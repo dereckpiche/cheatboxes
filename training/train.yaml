@@ -1,0 +1,128 @@
+# The training recipe every method starts from: Qwen3.5-4B with LoRA, GRPO,
+# vLLM rollouts, one environment episode per trajectory. Layered on verl's
+# default `ppo_trainer`; anything not set here keeps verl's default.
+# run.py adds the method's overrides, then the command line's.
+# ${oc.env:NAME,default} reads an environment variable.
+
+hydra:
+  searchpath:
+    - pkg://verl.trainer.config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+data:
+  train_files: ${oc.env:DATA,data/PeekResist}/train.parquet
+  val_files: ${oc.env:DATA,data/PeekResist}/val.parquet
+  train_batch_size: 8             # tasks per step; each gets rollout.n samples
+  val_max_samples: 256
+  max_prompt_length: 1024
+  # Everything after the prompt: model tokens and tool outputs. The model's
+  # own output is capped by the task's budget, so leave room for tools.
+  max_response_length: 4096
+  return_raw_chat: true           # the loop gets chat messages, not a string
+  apply_chat_template_kwargs:
+    enable_thinking: true         # Qwen3.5's small models' template defaults to off
+  return_multi_modal_inputs: false
+  filter_overlong_prompts: true
+  dataloader_num_workers: 0
+
+algorithm:
+  adv_estimator: grpo
+  # vLLM and the trainer compute slightly different probabilities. Token
+  # weights pi_trainer / pi_vllm are capped at 2, and an episode whose mean
+  # log-ratio leaves +-0.01 is dropped.
+  rollout_correction:
+    rollout_is: token
+    rollout_is_threshold: 2.0
+    rollout_rs: seq_mean_k1
+    rollout_rs_threshold: 0.99_1.01
+
+actor_rollout_ref:
+  model:
+    path: ${oc.env:MODEL,Qwen/Qwen3.5-4B}
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+    override_config:
+      attn_implementation: flash_attention_2
+    lora_rank: 512
+    lora_alpha: 1024
+    lora:
+      merge: false                # vLLM applies the adapters itself
+
+  # One full replica per GPU, nothing sharded or offloaded. Strictly
+  # on-policy: one optimizer step per rollout batch. With LoRA the KL
+  # reference is the actor with its adapters switched off.
+  actor:
+    strategy: fsdp2
+    optim:
+      lr: 3.0e-6
+      optimizer: AdamW
+      weight_decay: 0.0
+    ppo_mini_batch_size: 8        # = train_batch_size
+    ppo_epochs: 1
+    loss_agg_mode: seq-mean-token-mean   # every episode weighs the same
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 8192
+    use_kl_loss: true
+    kl_loss_coef: 1.0e-4
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      fsdp_size: 1
+    checkpoint:
+      save_lora_only: true        # base weights reload from model.path
+
+  rollout:
+    name: vllm
+    mode: async
+    tensor_model_parallel_size: 1
+    gpu_memory_utilization: 0.3   # shares the GPU with the actor
+    max_model_len: 5120
+    temperature: 1.0
+    max_num_seqs: 64              # Qwen3.5's linear attention: one block per sequence
+    n: 4                          # GRPO group size
+    val_kwargs:                   # validation samples like training does
+      do_sample: true
+      temperature: 1.0
+      n: 1
+    checkpoint_engine:
+      update_weights_bucket_megabytes: 3072
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 8192
+    multi_turn:
+      enable: true
+      format: qwen3_coder         # Qwen3.5 writes tool calls as XML
+      max_assistant_turns: 64     # a ceiling; each episode enforces its own turns
+      max_tool_response_length: 4000
+      max_parallel_calls: 8       # verl's default 1 silently drops a turn's other calls
+    agent:
+      num_workers: 2              # the loop itself is the method's (run.py)
+
+reward:
+  num_workers: 2                  # unused (the loop grades), but verl starts them
+
+transfer_queue:
+  backend:
+    SimpleStorage:
+      num_data_storage_units: 2
+
+ray_kwargs:
+  ray_init:
+    num_cpus: 32
+
+trainer:
+  logger: [console]               # training.progress sends to wandb
+  project_name: cheatboxes
+  experiment_name: ${oc.env:EXP,cheatboxes}
+  n_gpus_per_node: ${oc.decode:${oc.env:GPUS,1}}
+  nnodes: 1
+  val_before_train: true
+  test_freq: 10
+  save_freq: 50                   # LoRA + Adam, ~15 GB per GPU at rank 512
+  total_epochs: 10
+  log_val_generations: 0
+  default_local_dir: ${oc.env:RUN_DIR,runs/${trainer.experiment_name}}
+  resume_mode: auto
+  max_actor_ckpt_to_keep: 1       # enough to resume
