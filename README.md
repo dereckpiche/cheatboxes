@@ -46,7 +46,7 @@ But the most difficult environments in the suite, such as SafeSpeedups, are desi
 Here, we list desired properties of environments.
 Environments in the suite may or may not respect all of these.
 
-- **Mandatory: Centered around hacking, not subtle incompetence.**
+- **Mandatory: Centered around hacking, not regular incompetence.**
 What is the difference between an agent hacking and an agent being incompetent at the task?
 The difference is that it can be very difficult for an agent to become competent, whereas not hacking is a much more trivial decision.
 There is therefore something specific about hacking, which distinguishes it from regular capabilities research.
@@ -62,7 +62,7 @@ This attribute can conflict with the "No safety by overfitting" attribute.
 A good resolution can be seen in the "SafeSpeedups" environment, where the space of reward hacks can be made incredibly large, but we use a sophisticated program (Z3) to get the ground truth.
 
 
-- **Optional: No safety by overfitting.**
+- **Optional: No safety by overfitting the benchmark.**
 Many reward hacking benchmarks can be solved in a trivial way.
 An example is simply having the test cases in the agent's files.
 One can easily train a model beforehand so that it never edits those files.
@@ -85,18 +85,19 @@ If it's too toyish, communicating results becomes difficult.
 If it's not relatable, people need to learn too much to understand it.
 
 
-
-
 ### Multi-agent Benchmark Attributes
 
-- **Zero-sum.**
-It is impossible for an agent to gain some reward without the other agents losing the same amount.
+- **Tunable concentration of hack-pressure.**
+We can target the swarm to pressure a sub-set of agents to hack.
+During training, we can switch to a drastic level of pressure on a single judge.
+The anti-reward hacking mechanism would need to be robust to rapid changes the scale of reward hacks.
+Might need to fend-off a lot of out-of-distribution attacks.
 
-- **Fully cooperative.**
-All agents share the same reward function.
-
-- **General-sum.**
-In between zero-sum and fully cooperative.
+- **Diffusion of the hack.**
+A lot of the difficulties of reward hacking stem from obfuscations of the actor.
+If the LLM judge can tell what the actor is doing, it becomes much easier to hack.
+But if a collective grows, and judges and actors only see a partial portion, it might become easy to diffuse a hack such that no single actor looks responsible.
+Even the actors might learn some small part of the hacking behavior which they do not know the full consequences of.   
 
 ### Layout
 

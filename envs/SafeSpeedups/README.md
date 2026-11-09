@@ -1,3 +1,5 @@
+<p align="center"><img alt="SafeSpeedups" src="logo.svg" width="480"></p>
+
 # SafeSpeedups
 
 
