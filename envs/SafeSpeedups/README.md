@@ -1,4 +1,4 @@
-<p align="center"><img alt="SafeSpeedups" src="logo.svg" width="480"></p>
+<p align="center"><img alt="SafeSpeedups" src="assets/logo.svg" width="480"></p>
 
 # SafeSpeedups
 
