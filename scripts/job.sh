@@ -20,5 +20,6 @@ export TMPDIR=$SLURM_TMPDIR SANDBOX_ROOT=$SLURM_TMPDIR/sandbox
 export PYTHONUNBUFFERED=1 RAY_worker_register_timeout_seconds=300
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 unset ROCR_VISIBLE_DEVICES
+ulimit -u 65536 2>/dev/null || true
 echo "$(hostname)  $(nvidia-smi -L | head -1)  commit $GIT_COMMIT  run dir $RUN_DIR"
 srun uv run "$@"

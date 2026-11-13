@@ -48,6 +48,7 @@ packages = ["envs", "training"]
 
 [tool.uv]
 default-groups = ["dev", "train", "cuda"]
+python-preference = "only-managed"
 override-dependencies = ["transformers==5.16.1", "numpy>=2.0.0", "kernels>=0.12.0,<0.13"]
 
 [[tool.uv.dependency-metadata]]

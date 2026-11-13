@@ -119,7 +119,7 @@ transfer_queue:
 
 ray_kwargs:
   ray_init:
-    num_cpus: 32
+    num_cpus: ${oc.decode:${oc.env:SLURM_CPUS_ON_NODE,32}}  # the job's CPUs, not the node's
 
 trainer:
   logger: [console]               # training.progress sends to wandb
