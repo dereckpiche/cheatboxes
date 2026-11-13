@@ -1,7 +1,9 @@
 # @package _global_
-# 4 H100 (80 GB), a 27B model: two vLLM replicas of two GPUs each, at 60% of
-# the GPU; the actor's weights and Adam wait in CPU memory between updates,
-# and its logits are processed in chunks. Evaluated (val_only) first.
+# 4 H100 (80 GB), a 27B model: two vLLM replicas of two GPUs each, at 35% of
+# the GPU (Qwen3.8 is mostly linear attention: a small KV cache), leaving the
+# actor ~45 GB to hand its weights to vLLM (at 60% that OOMed, Mila
+# 2026-11-13). The actor's weights and Adam wait in CPU memory between
+# updates, and its logits are processed in chunks.
 
 trainer:
   n_gpus_per_node: 4
@@ -19,4 +21,4 @@ actor_rollout_ref:
       model_dtype: bf16
   rollout:
     tensor_model_parallel_size: 2
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.35
