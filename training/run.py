@@ -12,6 +12,7 @@ UniformChoice forum (forum/); the console and wandb get a few lines per
 step (see training.progress).
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -134,21 +135,20 @@ def main() -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
+    config = {
+        "exp": os.environ["EXP"],
+        "model": model,
+        "env": os.environ["ENV"],
+        "overrides": overrides,
+        "hardware": hardware,
+        "gpu": found[0],
+        "gpus": len(found),
+        "commit": os.environ.get("GIT_COMMIT", ""),
+    }
+    (run_dir / "run.json").write_text(json.dumps(config, indent=2) + "\n")
     with open(run_dir / "verl.log", "a", buffering=1) as raw:
         start = raw.tell()
-        progress.follow(
-            verl.stdout,
-            raw,
-            os.environ["EPISODE_LOG"],
-            {
-                "gpu": found[0],
-                "gpus": len(found),
-                "hardware": hardware,
-                "model": model,
-                "env": os.environ["ENV"],
-                "overrides": overrides,
-            },
-        )
+        progress.follow(verl.stdout, raw, os.environ["EPISODE_LOG"], config)
     code = verl.wait()
     sys.exit(code or crashed(run_dir / "verl.log", start))
 
