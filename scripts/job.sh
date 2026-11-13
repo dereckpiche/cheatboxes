@@ -11,10 +11,11 @@ OUTPUT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'StdOut=\K\S+')
 export RUN_DIR=${RUN_DIR:-$(dirname "$OUTPUT")}
 export WANDB_DIR=$RUN_DIR
 export TMPDIR=$SLURM_TMPDIR SANDBOX_ROOT=$SLURM_TMPDIR/sandbox
+export VLLM_CACHE_ROOT=$SLURM_TMPDIR/vllm TRITON_CACHE_DIR=$SLURM_TMPDIR/triton
+export TORCHINDUCTOR_CACHE_DIR=$SLURM_TMPDIR/inductor FLASHINFER_WORKSPACE_BASE=$SLURM_TMPDIR
 export PYTHONUNBUFFERED=1 RAY_worker_register_timeout_seconds=300
 export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-unset ROCR_VISIBLE_DEVICES
 ulimit -u 65536 2>/dev/null || true
 echo "$(hostname)  $(nvidia-smi -L | head -1)  commit $GIT_COMMIT  run dir $RUN_DIR"
 VENV=$PWD/.venv
@@ -29,4 +30,4 @@ if [ -d "$CUDA" ]; then
   [ -e "$CUDA/lib64" ] || ln -s lib "$CUDA/lib64"
   ln -sf libcudart.so.13 "$CUDA/lib/libcudart.so"
 fi
-srun "$@"
+srun env -u ROCR_VISIBLE_DEVICES "$@"
