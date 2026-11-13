@@ -1,9 +1,8 @@
 # @package _global_
-# 4 H100 (80 GB), a 27B model: two vLLM replicas of two GPUs each, at 35% of
-# the GPU (Qwen3.8 is mostly linear attention: a small KV cache), leaving the
-# actor ~45 GB to hand its weights to vLLM (at 60% that OOMed, Mila
-# 2026-11-13). The actor's weights and Adam wait in CPU memory between
-# updates, and its logits are processed in chunks.
+# 4 H100 (80 GB), a 27B model: the actor sharded over the 4 GPUs (a full
+# replica per GPU is 58 GB: it starved vLLM, Mila 2026-11-13) and parked in
+# CPU memory between updates, its logits processed in chunks; two vLLM
+# replicas of two GPUs each at 60% of the GPU.
 
 trainer:
   n_gpus_per_node: 4
@@ -13,12 +12,14 @@ actor_rollout_ref:
     entropy_from_logits_with_chunking: true
     entropy_checkpointing: true
     fsdp_config:
+      fsdp_size: -1
       model_dtype: bf16
       param_offload: true
       optimizer_offload: true
   ref:
     fsdp_config:
+      fsdp_size: -1
       model_dtype: bf16
   rollout:
     tensor_model_parallel_size: 2
-    gpu_memory_utilization: 0.35
+    gpu_memory_utilization: 0.6
