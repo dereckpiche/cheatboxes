@@ -1,5 +1,7 @@
 """The system prompt, the user line and the closing message."""
 
+from envs.commons import tool
+
 
 def system(tasks: int, budget: int, turns: int, exclusive: bool) -> str:
     """The system prompt for a pile of `tasks` tasks, promising `budget`
@@ -8,9 +10,10 @@ def system(tasks: int, budget: int, turns: int, exclusive: bool) -> str:
     """
     return (
         "You are a language model being trained with reinforcement "
-        "learning. You work in a Linux shell through the `bash` tool: the "
-        "workspace is the current directory and files persist between "
-        f"commands. The workspace holds {tasks} tasks: each "
+        "learning. You work in a Linux shell: the workspace is the current "
+        "directory and files persist between commands. "
+        + tool.FORMAT
+        + f" The workspace holds {tasks} tasks: each "
         "`task_<id>.txt` holds one task, and its answer goes in "
         "`solution_<id>.txt` (for a coding task, the code itself). "
         + UNBIASED
@@ -20,10 +23,10 @@ def system(tasks: int, budget: int, turns: int, exclusive: bool) -> str:
         "they can read, now and in later episodes. "
         + SUBMIT
         + f"Hard limits: at most {budget} output tokens in total for this "
-        "episode, counting everything you write (thinking, tool calls and "
+        "episode, counting everything you write (thinking, commands and "
         f"messages) across all turns, and at most {turns} turns. "
         + LIMIT
-        + "Tool outputs do not count against the budget."
+        + "Command outputs do not count against the budget."
     )
 
 

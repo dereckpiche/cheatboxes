@@ -15,7 +15,7 @@ the deactivated ones unmarked. There is no validation split: `honest`
 and `gap` measure on the training episodes themselves what a held-out
 set would.
 
-    chat, task = generate(8, seed=0)["train"][0]
+    chat, task = instance("train", 0)
     ep = Episode(task)
     ep.step("ls; cat task_*.txt")
     ep.step("submit")
@@ -32,7 +32,7 @@ from envs.UniformChoice import prompts
 from envs.UniformChoice.episode import Episode
 from envs.UniformChoice.tells import apply, draw, pinned, task_id
 
-__all__ = ["Episode", "generate"]
+__all__ = ["Episode", "SPLITS", "instance"]
 
 PUZZLES = {
     "sokoban": {
@@ -70,6 +70,9 @@ reasoning in general."""
 NAMES = 16
 """Id sets per pile; each episode draws one, so the tasks' order in `ls`
 varies within a GRPO group instead of being fixed by the pile."""
+SPARE = 4
+"""Problems drawn beyond `tasks` per pile, for those an empty answer solves."""
+SPLITS = ("train",)
 
 
 def configs(source: str) -> dict:
@@ -80,8 +83,9 @@ def configs(source: str) -> dict:
     return {name: PUZZLES.get(name, {}) for name in names}
 
 
-def generate(
-    n: int,
+def instance(
+    split: str,
+    index: int,
     seed: int = 0,
     source: str = SOURCE,
     budget: int = 2000,
@@ -91,19 +95,25 @@ def generate(
     tell: str = "",
     exclusive: bool = True,
     **config,
-) -> dict[str, list[tuple[list[dict], dict]]]:
-    """`n` training piles of `tasks` problems each, drawn from a pool of
-    `source`'s problems (its `PUZZLES` config, overridden by the remaining
-    keywords), all sharing the tell pair the seed draws. `exclusive`: at
-    most one solution file may be filled, else nothing is graded.
+) -> tuple[list[dict], dict]:
+    """Pile `index` of `tasks` problems of `source` (its `PUZZLES` config,
+    overridden by the remaining keywords), marked with the tell pair the
+    seed draws, the same for every pile. `exclusive`: at most one solution
+    file may be filled, else nothing is graded.
     """
     config = configs(source) | config
     src = sources.load(source, config)
-    rng = random.Random(f"UniformChoice-{seed}")
-    pair = (pinned(tell, rng), []) if tell else draw(rng)
-    pool = src.problems(n * tasks, seed)
-    blanks = src.score_all([(p.spec, "") for p in pool])
-    pool = [p for p, blank in zip(pool, blanks) if blank < 1.0]
+    shared = random.Random(f"UniformChoice-{seed}")
+    pair = (pinned(tell, shared), []) if tell else draw(shared)
+    rng = random.Random(f"UniformChoice-{seed}-{index}")
+    problems = src.problems(tasks + SPARE, rng.getrandbits(32))
+    blanks = src.score_all([(p.spec, "") for p in problems])
+    problems = [p for p, blank in zip(problems, blanks) if blank < 1.0]
+    if len(problems) < tasks:
+        raise ValueError(f"{source}: too few gradable problems for {index}")
+    pile = layout(problems[:tasks], pair, tells, rng)
+    pile.update(source=source, config=config)
+    pile.update(budget=budget, turns=turns, exclusive=exclusive)
     chat = [
         {
             "role": "system",
@@ -111,14 +121,7 @@ def generate(
         },
         {"role": "user", "content": prompts.user()},
     ]
-    rows = []
-    for i in range(n):
-        rng = random.Random(f"UniformChoice-{seed}-{i}")
-        pile = layout(rng.sample(pool, tasks), pair, tells, rng)
-        pile.update(source=source, config=config)
-        pile.update(budget=budget, turns=turns, exclusive=exclusive)
-        rows.append((chat, pile))
-    return {"train": rows}
+    return chat, pile
 
 
 def layout(chunk, pair, tells: bool, rng: random.Random) -> dict:

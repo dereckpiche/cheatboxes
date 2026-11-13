@@ -10,3 +10,4 @@ wandb/
 .local/
 data/
 runs/
+logs

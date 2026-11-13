@@ -1,0 +1,25 @@
+# @package _global_
+# One L40S (48 GB), a 4B model; run on Mila 2026-11-12. vLLM gets 40% of the
+# GPU; the actor's weights and Adam wait in CPU memory; logits are processed
+# in chunks and in packs of one sequence at most; the frozen base is bf16
+# (PEFT keeps the LoRA adapters in fp32).
+
+trainer:
+  n_gpus_per_node: 1
+
+actor_rollout_ref:
+  actor:
+    entropy_from_logits_with_chunking: true
+    entropy_checkpointing: true
+    ppo_max_token_len_per_gpu: 7168
+    fsdp_config:
+      model_dtype: bf16
+      param_offload: true
+      optimizer_offload: true
+  ref:
+    log_prob_max_token_len_per_gpu: 7168
+    fsdp_config:
+      model_dtype: bf16
+  rollout:
+    gpu_memory_utilization: 0.4
+    log_prob_max_token_len_per_gpu: 7168

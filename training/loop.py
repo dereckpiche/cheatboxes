@@ -4,13 +4,12 @@ one tool.
 verl calls `await loop.run(sampling_params, **row)` once per trajectory,
 on an event loop shared by hundreds of them (so anything blocking goes
 through `asyncio.to_thread`), and `await tool.execute(...)` once per tool
-call. Tokens, masks, tool-call parsing and the policy update stay verl's:
-`EpisodeLoop` is verl's `ToolAgentLoop` with the episode opened before,
-graded after, and the episode's output budget, if it has one, enforced
-in between. The environment is whichever the row names (see `envs`).
-
-A method changes training by subclassing `EpisodeLoop` and overriding
-`intervene`, which sees every graded episode before verl does.
+call. Tokens, masks and the policy update stay verl's: `EpisodeLoop` is
+verl's `ToolAgentLoop` with the episode opened before, graded after, and
+the episode's output budget, if it has one, enforced in between. Calls are
+`envs.commons.tool`'s, read by `training.parsers`; the chat template gets
+no tool list, so the prompt carries none of its tool preamble. The
+environment is whichever the row names (see `envs`).
 """
 
 import asyncio
@@ -25,16 +24,25 @@ from verl.experimental.agent_loop.tool_agent_loop import (
 from verl.tools.base_tool import BaseTool
 from verl.tools.schemas import OpenAIFunctionToolSchema, ToolResponse
 
-from training import data
+from training import instances
+from training.parsers import BashTagParser
+
+REGISTERED_PARSERS = (BashTagParser,)
+"""Tool-call parsers this module registers with verl by importing them."""
+THINK_TAGS = (
+    ("<think>", "</think>"),
+    ("<ifm|think>", "</ifm|think>"),
+    ("<ifm|think_fast>", "</ifm|think_fast>"),
+    ("<ifm|think_faster>", "</ifm|think_faster>"),
+)
+"""The reasoning blocks models write: Qwen's, then K2-Horizon's by
+reasoning effort (high, medium, low)."""
 
 EPISODES: dict[str, object] = {}
 """This worker's live episodes, keyed by an id the loop hands to the tool
 through verl's per-trajectory `tools_kwargs`."""
 CALLS: dict[str, int] = {}
 """The tool calls each live episode has received."""
-TURNS: dict[str, asyncio.Lock] = {}
-"""Each live episode's lock: verl starts a turn's tool calls together, and
-they must run one at a time, in the order the model wrote them."""
 CLOSING_TOKENS = 256
 """What the model may write in an episode's closing turn."""
 CLOSING_ROOM = 512
@@ -46,7 +54,7 @@ SCHEMA = OpenAIFunctionToolSchema.model_validate(
         "type": "function",
         "function": {
             "name": "bash",
-            "description": "Run a bash command in the workspace.",
+            "description": "Run a bash command.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -72,7 +80,7 @@ class Bash(BaseTool):
         key = agent_data.tools_kwargs["episode"]
         episode = EPISODES[key]
         CALLS[key] += 1
-        async with TURNS[key], self.slots:
+        async with self.slots:
             output = await asyncio.to_thread(
                 episode.step, str(parameters.get("command", ""))
             )
@@ -82,43 +90,35 @@ class Bash(BaseTool):
 class EpisodeLoop(ToolAgentLoop):
     """verl's tool loop around one environment episode."""
 
+    def __init__(self, *args, **kwargs):
+        """verl's loop, with no tool list for the chat template to render."""
+        super().__init__(*args, **kwargs)
+        self.tool_schemas = []
+
     async def run(self, sampling_params, **row):
-        """Open the episode, let verl run the conversation, grade it, let
-        the method intervene, log it. The grade's metrics stay on the loop
-        (`metrics`) for the method to read.
+        """Open the episode, let verl run the conversation, grade it, log
+        it.
         """
         split = row["extra_info"]["split"]
         key = uuid.uuid4().hex
-        episode = await asyncio.to_thread(data.episode, row["extra_info"])
-        EPISODES[key], CALLS[key], TURNS[key] = episode, 0, asyncio.Lock()
+        episode = await asyncio.to_thread(instances.episode, row["extra_info"])
+        EPISODES[key], CALLS[key] = episode, 0
         try:
             row = {**row, "tools_kwargs": {"episode": key}}
             output = await super().run(sampling_params, **row)
-            reward, self.metrics = await asyncio.to_thread(episode.grade)
+            reward, metrics = await asyncio.to_thread(episode.grade)
         finally:
             EPISODES.pop(key, None)
-            TURNS.pop(key, None)
             calls = CALLS.pop(key, 0)
             await asyncio.to_thread(episode.close)
         output.reward_score = reward
-        record = self.record(output, split, reward, calls)
+        record = self.record(output, split, reward, metrics, calls)
         record["env"] = row["extra_info"]["env"]
         record["task"] = row["extra_info"]["index"]
-        record["method"] = await self.intervene(output, split)
-        record["reward_final"] = output.reward_score
         ids = output.prompt_ids + output.response_ids
         record["transcript"] = self.tokenizer.decode(ids)
         append(record)
         return output
-
-    async def intervene(self, output, split: str) -> dict[str, float]:
-        """What a method (a cure or an extra) does with a graded episode:
-        it may change the trajectory and its reward, and it returns what it
-        measured, logged under the split's rollout group by the names it
-        gives (numbers averaged, text as tables). No method, no change,
-        nothing logged.
-        """
-        return {}
 
     async def _handle_generating_state(self, agent_data, params, **kwargs):
         """Each model turn: stop once the episode is over; once its turns
@@ -194,25 +194,26 @@ class EpisodeLoop(ToolAgentLoop):
         return True
 
     def skip_thinking(self, agent_data) -> None:
-        """Close the <think> block the generation prompt opens, as the chat
-        template does with thinking off, so that the short closing turn is
-        an answer, not the start of more reasoning. The added tokens are
+        """Close the reasoning block the generation prompt opens, as the
+        chat template does with thinking off, so that the short closing turn
+        is an answer, not the start of more reasoning. The added tokens are
         context (mask 0), not the model's.
         """
-        tail = self.tokenizer.decode(agent_data.prompt_ids[-4:])
-        opened = tail.rstrip().endswith("<think>")
-        text = "\n</think>\n\n" if opened else "<think>\n\n</think>\n\n"
+        tail = self.tokenizer.decode(agent_data.prompt_ids[-4:]).rstrip()
+        opened = [close for start, close in THINK_TAGS if tail.endswith(start)]
+        text = f"\n{opened[0]}\n\n" if opened else "<think>\n\n</think>\n\n"
         ids = self.tokenizer.encode(text, add_special_tokens=False)
         agent_data.prompt_ids = agent_data.prompt_ids + ids
         agent_data.response_mask = agent_data.response_mask + [0] * len(ids)
         if agent_data.response_logprobs:
             agent_data.response_logprobs += [0.0] * len(ids)
 
-    def record(self, output, split: str, reward: float, calls: int) -> dict:
-        """What the episode log keeps about the episode, taken before the
-        method acts on it: its grade (reward_task), the environment's metrics,
-        tool calls and token counts. The reward the method leaves
-        (reward_final) is added after it.
+    def record(
+        self, output, split: str, reward: float, metrics: dict, calls: int
+    ) -> dict:
+        """What the episode log keeps about the episode: its grade
+        (reward_task, the reward trained on), the environment's metrics,
+        tool calls and token counts.
         """
         mask = output.response_mask
         ids = output.prompt_ids + output.response_ids
@@ -220,7 +221,7 @@ class EpisodeLoop(ToolAgentLoop):
         return {
             "split": split,
             "reward_task": reward,
-            "metrics": self.metrics,
+            "metrics": metrics,
             "tool_calls": calls,
             "output_tokens": sum(mask),
             "reasoning_tokens": thinking(self.tokenizer, ids, generated),
@@ -236,15 +237,25 @@ def append(record: dict) -> None:
             file.write(json.dumps(record) + "\n")
 
 
-def thinking(tokenizer, ids: list[int], mask: list[int]) -> int:
-    """Model tokens between a `<think>` and the next `</think>`; the
-    opening tag may come from the prompt's template.
+def think_token_ids(tokenizer) -> tuple[set[int], set[int]]:
+    """The ids of the tokenizer's reasoning tags: openers, then closers.
+    Tags it does not hold as single tokens are left out.
     """
-    start, end = tokenizer.convert_tokens_to_ids(["<think>", "</think>"])
+    vocabulary = tokenizer.get_vocab()
+    starts = {vocabulary[s] for s, _ in THINK_TAGS if s in vocabulary}
+    ends = {vocabulary[e] for _, e in THINK_TAGS if e in vocabulary}
+    return starts, ends
+
+
+def thinking(tokenizer, ids: list[int], mask: list[int]) -> int:
+    """Model tokens inside a reasoning block, between an opening tag (which
+    may come from the prompt's template) and its closing tag.
+    """
+    starts, ends = think_token_ids(tokenizer)
     inside, count = False, 0
     for token, generated in zip(ids, mask):
-        if token in (start, end):
-            inside = token == start
+        if token in starts or token in ends:
+            inside = token in starts
         elif inside and generated:
             count += 1
     return count

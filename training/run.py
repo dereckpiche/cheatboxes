@@ -1,78 +1,83 @@
-"""Train with one method on the environment the dataset holds.
+"""Train with RL on an environment, its instances made as the run goes.
 
-    EXP=<name> DATA=<dataset dir> python -m training.run <method> [overrides]
+    EXP=<name> ENV=<environment> python -m training.run [overrides]
 
-A method is a file in training/methods/ that defines `OVERRIDES`, and
-optionally an `EpisodeLoop` subclass, which becomes the run's agent loop.
-verl starts with the recipe (training/train.yaml), then the method's
-`OVERRIDES`, then the command line's, so the last word is yours. The run
-directory (RUN_DIR, default runs/<EXP>) gets the checkpoints, the agent
-loop's file (loops.yaml), verl's full output (verl.log), one line per
-episode (episodes.jsonl) and the UniformChoice forum (forum/); the console
-and wandb get a few lines per step (see training.progress).
+verl starts with the recipe (training/train.yaml), then the preset for the
+GPU the job landed on (training/hardware/, HARDWARE=<preset> to force one),
+then the command line's overrides, so the last word is yours. Presets
+change only how the work fits on a GPU, never the experiment. The run
+directory (RUN_DIR, default runs/<EXP>) gets the checkpoints, verl's full
+output (verl.log), one line per episode (episodes.jsonl) and the
+UniformChoice forum (forum/); the console and wandb get a few lines per
+step (see training.progress).
 """
 
-import importlib
-import importlib.util
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+import envs
 from training import progress
-from training.loop import EpisodeLoop
 
 CONFIG = Path(__file__).resolve().parent
 ROOT = CONFIG.parent
 
+MODEL = "IFM/K2-Horizon-3.7B"
+"""The model trained when MODEL is not set."""
+MODEL_SIZES = {
+    "IFM/K2-Horizon-3.7B": "4b",
+    "Qwen/Qwen3.5-4B": "4b",
+    "Qwen/Qwen3.5-9B": "9b",
+    "Qwen/Qwen3.8-27B": "27b",
+}
+"""Each model's size, the last part of its presets' names."""
+GPU_MODELS = ("L40S", "H100", "H200")
+"""The GPUs with presets, as nvidia-smi names them."""
 
-def method(name: str):
-    """The method called `name`."""
-    if importlib.util.find_spec(f"training.methods.{name}"):
-        module = importlib.import_module(f"training.methods.{name}")
-        if hasattr(module, "OVERRIDES"):
-            return module
-    raise SystemExit(f"no method to train with is called {name}")
+
+def gpus() -> list[str]:
+    """Name every GPU this job sees, e.g. "NVIDIA H100 80GB HBM3"."""
+    listing = subprocess.run(
+        ["nvidia-smi", "-L"], capture_output=True, text=True, check=True
+    ).stdout
+    if "MIG" in listing:
+        raise SystemExit(f"no preset fits a MIG slice:\n{listing}")
+    lines = [line for line in listing.splitlines() if line.startswith("GPU ")]
+    return [line.split(": ", 1)[1].split(" (UUID")[0] for line in lines]
 
 
-def loop(module) -> str:
-    """The method's agent loop as an import path: the `EpisodeLoop`
-    subclass its file defines, else `EpisodeLoop` itself.
+def preset(found: list[str], model: str) -> str:
+    """Name the preset for the GPUs `found` training `model`, e.g.
+    "h100x4-4b" for four H100s and a 4B model.
     """
-    for value in vars(module).values():
-        if (
-            isinstance(value, type)
-            and issubclass(value, EpisodeLoop)
-            and value.__module__ == module.__name__
-        ):
-            return f"{module.__name__}.{value.__name__}"
-    return "training.loop.EpisodeLoop"
+    kinds = [k for k in GPU_MODELS if k in found[0]]
+    size = MODEL_SIZES.get(model)
+    name = f"{kinds[0].lower()}x{len(found)}-{size}" if kinds and size else ""
+    if not (CONFIG / "hardware" / f"{name}.yaml").is_file():
+        raise SystemExit(
+            f"no preset for {len(found)}x {found[0]} training {model}: add"
+            " training/hardware/<gpu>x<count>-<size>.yaml (and the model to"
+            " MODEL_SIZES)"
+        )
+    return name
 
 
-def write_loops(name: str, path: Path) -> None:
-    """The agent loop file verl reads: one loop, the method's, by its name."""
-    path.write_text(f"- name: {name}\n  _target_: {loop(method(name))}\n")
-
-
-def validation(data: Path) -> list[str]:
-    """No validation phase when the dataset has no val split: the environment
-    then measures what it needs on the training episodes.
+def validation(env: str) -> list[str]:
+    """No validation phase when the environment has no val split: it then
+    measures what it needs on the training episodes.
     """
-    if (data / "val.parquet").exists():
+    if "val" in envs.load(env).SPLITS:
         return []
     return [
-        f"data.val_files={data / 'train.parquet'}",
+        "data.val_files=train",
         "trainer.val_before_train=false",
         "trainer.test_freq=-1",
     ]
 
 
-def command(name: str, overrides: list[str], loops: Path) -> list[str]:
-    """The verl command line that trains with the method `name`, its agent
-    loop listed in the file `loops`.
-    """
-    module = method(name)
-    data = Path(os.environ.get("DATA", "data/PeekResist")).resolve()
+def command(overrides: list[str], hardware: str) -> list[str]:
+    """The verl command line that trains on the `hardware` preset."""
     rollout = "actor_rollout_ref.rollout"
     return [
         sys.executable,
@@ -81,38 +86,71 @@ def command(name: str, overrides: list[str], loops: Path) -> list[str]:
         f"--config-path={CONFIG}",
         "--config-name=train",
         f"{rollout}.multi_turn.tool_config_path={CONFIG / 'tools.yaml'}",
-        f"{rollout}.agent.agent_loop_config_path={loops}",
-        f"{rollout}.agent.default_agent_loop={name}",
-        *validation(data),
-        *module.OVERRIDES,
+        f"{rollout}.agent.agent_loop_config_path={CONFIG / 'loops.yaml'}",
+        f"{rollout}.agent.default_agent_loop=episode",
+        *validation(os.environ["ENV"]),
+        f"+hardware={hardware}",
         *overrides,
     ]
+
+
+HYDRA_FAILURE = "Error executing job with overrides"
+"""What Hydra prints when the run raised, even when verl then exits 0."""
+
+
+def crashed(log: Path, start: int) -> int:
+    """1 if this run's part of verl's log (from byte `start`) shows a
+    failure, else 0."""
+    with open(log) as file:
+        file.seek(start)
+        return int(HYDRA_FAILURE in file.read())
 
 
 def main() -> None:
     """Run verl in a child process whose workers can import this repo, and
     follow its output.
     """
-    name, *overrides = sys.argv[1:]
-    os.environ.setdefault("EXP", name)
+    overrides = sys.argv[1:]
+    os.environ.setdefault("EXP", "cheatboxes")
+    os.environ.setdefault("MODEL", MODEL)
+    os.environ.setdefault("ENV", "PeekResist")
     run_dir = Path(os.environ.get("RUN_DIR", f"runs/{os.environ['EXP']}"))
     run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     os.environ["RUN_DIR"] = str(run_dir)
     os.environ["EPISODE_LOG"] = str(run_dir / "episodes.jsonl")
     os.environ["UNIFORMCHOICE_FORUM"] = str(run_dir / "forum")
-    write_loops(name, run_dir / "loops.yaml")
+    found = gpus()
+    model = os.environ["MODEL"]
+    hardware = os.environ.get("HARDWARE") or preset(found, model)
+    print(
+        f"hardware {hardware} ({len(found)}x {found[0]}, {model})", flush=True
+    )
     paths = [str(ROOT), os.environ.get("PYTHONPATH", "")]
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
     verl = subprocess.Popen(
-        command(name, overrides, run_dir / "loops.yaml"),
+        command(overrides, hardware),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
     with open(run_dir / "verl.log", "a", buffering=1) as raw:
-        progress.follow(verl.stdout, raw, os.environ["EPISODE_LOG"])
-    sys.exit(verl.wait())
+        start = raw.tell()
+        progress.follow(
+            verl.stdout,
+            raw,
+            os.environ["EPISODE_LOG"],
+            {
+                "gpu": found[0],
+                "gpus": len(found),
+                "hardware": hardware,
+                "model": model,
+                "env": os.environ["ENV"],
+                "overrides": overrides,
+            },
+        )
+    code = verl.wait()
+    sys.exit(code or crashed(run_dir / "verl.log", start))
 
 
 if __name__ == "__main__":

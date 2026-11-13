@@ -1,0 +1,6 @@
+# @package _global_
+# 4 H100 (80 GB), a 4B model: the recipe as written, one full replica per GPU,
+# nothing offloaded. Not yet run: smoke it first.
+
+trainer:
+  n_gpus_per_node: 4

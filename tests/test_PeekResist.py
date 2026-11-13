@@ -4,9 +4,13 @@ from envs.PeekResist import episode, prompts, tasks
 CONFIG = dict(min_w=6, max_w=6, min_h=6, max_h=6, min_boxes=2, max_boxes=2)
 
 
+def make(split, index, **options):
+    """Sokoban task `index` of the split."""
+    return tasks.task("rg:sokoban", split, index, config=CONFIG, **options)
+
+
 def test_workspace_has_task_secret_black_and_empty_solution():
-    splits = tasks.generate("rg:sokoban", 4, config=CONFIG)
-    task = splits["train"][0]
+    task = make("train", 0)
     assert task.files["solution.txt"] == ""
     others = {n: t for n, t in task.files.items() if n != "solution.txt"}
     assert all(len(n) == 10 and n.endswith(".txt") for n in others)
@@ -23,9 +27,8 @@ def test_workspace_has_task_secret_black_and_empty_solution():
 
 
 def test_task_file_is_not_always_the_first_name():
-    splits = tasks.generate("rg:sokoban", 12, config=CONFIG)
     first = []
-    for task in splits["train"]:
+    for task in (make("train", i) for i in range(12)):
         names = sorted(n for n in task.files if len(n) == 10)
         first.append(task.files[names[0]].startswith("Info\n"))
     assert not all(first)
@@ -33,9 +36,8 @@ def test_task_file_is_not_always_the_first_name():
 
 def test_train_cheat_solves_and_val_decoy_fails():
     src = sources.load("rg:sokoban", CONFIG)
-    splits = tasks.generate("rg:sokoban", 6, config=CONFIG)
-    for train, val in zip(splits["train"], splits["val"]):
-        assert train.spec == val.spec and train.cheat != val.cheat
+    for i in range(6):
+        train, val = make("train", i), make("val", i)
         assert src.score(train.spec, train.cheat) == 1.0
         assert src.score(val.spec, val.cheat) == 0.0
         assert src.score(val.spec, "") < 1.0
@@ -43,16 +45,14 @@ def test_train_cheat_solves_and_val_decoy_fails():
 
 def test_without_cheat_the_train_secret_is_the_decoy():
     src = sources.load("rg:sokoban", CONFIG)
-    splits = tasks.generate("rg:sokoban", 6, config=CONFIG, cheat=False)
-    for train, val in zip(splits["train"], splits["val"]):
-        assert train.cheat == val.cheat
+    for i in range(6):
+        train = make("train", i, cheat=False)
         assert src.score(train.spec, train.cheat) == 0.0
 
 
-def test_generation_is_reproducible():
-    a = tasks.generate("rg:sokoban", 3, config=CONFIG, seed=7)
-    b = tasks.generate("rg:sokoban", 3, config=CONFIG, seed=7)
-    assert a == b
+def test_a_task_is_the_same_every_time_and_differs_by_split():
+    assert make("train", 3, seed=7) == make("train", 3, seed=7)
+    assert make("train", 3, seed=7).spec != make("val", 3, seed=7).spec
 
 
 def test_shows_matches_canary_lines_in_any_case():

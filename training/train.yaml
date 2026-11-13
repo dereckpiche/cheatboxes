@@ -1,7 +1,8 @@
-# The training recipe every method starts from: Qwen3.5-4B with LoRA, GRPO,
-# vLLM rollouts, one environment episode per trajectory. Layered on verl's
-# default `ppo_trainer`; anything not set here keeps verl's default.
-# run.py adds the method's overrides, then the command line's.
+# The training recipe: MODEL (run.py's default K2-Horizon-3.7B) with LoRA,
+# GRPO, vLLM rollouts, one environment episode per trajectory. Layered on
+# verl's default `ppo_trainer`; anything not set here keeps verl's default.
+# run.py adds the preset for the GPUs and the model (hardware/), then the
+# command line's overrides.
 # ${oc.env:NAME,default} reads an environment variable.
 
 hydra:
@@ -13,19 +14,26 @@ defaults:
   - _self_
 
 data:
-  train_files: ${oc.env:DATA,data/PeekResist}/train.parquet
-  val_files: ${oc.env:DATA,data/PeekResist}/val.parquet
-  train_batch_size: 8             # tasks per step; each gets rollout.n samples
-  val_max_samples: 256
+  # Instances are made as the run asks for them (training.instances), from
+  # the environment ENV with its settings: +data.env_config.<key>=<value>.
+  env: ${oc.env:ENV,PeekResist}
+  env_config: {}
+  seed: 0
+  custom_cls:
+    path: pkg://training.instances
+    name: Instances
+  train_files: train              # splits, not files
+  val_files: val
+  shuffle: false                  # instance i at step i // train_batch_size
+  train_batch_size: 8             # instances per step; each gets rollout.n samples
+  val_max_samples: 256            # validation instances, the same every time
   max_prompt_length: 1024
   # Everything after the prompt: model tokens and tool outputs. The model's
   # own output is capped by the task's budget, so leave room for tools.
-  max_response_length: 4096
-  return_raw_chat: true           # the loop gets chat messages, not a string
+  max_response_length: 6144
   apply_chat_template_kwargs:
     enable_thinking: true         # Qwen3.5's small models' template defaults to off
-  return_multi_modal_inputs: false
-  filter_overlong_prompts: true
+    reasoning_effort: low         # K2-Horizon: think_faster, a short reasoning block
   dataloader_num_workers: 0
 
 algorithm:
@@ -41,7 +49,8 @@ algorithm:
 
 actor_rollout_ref:
   model:
-    path: ${oc.env:MODEL,Qwen/Qwen3.5-4B}
+    path: ${oc.env:MODEL}
+    trust_remote_code: true       # K2-Horizon's modeling code ships with its weights
     use_remove_padding: true
     enable_gradient_checkpointing: true
     override_config:
@@ -79,7 +88,8 @@ actor_rollout_ref:
     mode: async
     tensor_model_parallel_size: 1
     gpu_memory_utilization: 0.3   # shares the GPU with the actor
-    max_model_len: 5120
+    load_format: auto             # LoRA never changes the base: vLLM loads it from the checkpoint
+    max_model_len: 7168           # prompt + response
     temperature: 1.0
     max_num_seqs: 64              # Qwen3.5's linear attention: one block per sequence
     n: 4                          # GRPO group size
@@ -93,12 +103,11 @@ actor_rollout_ref:
     log_prob_max_token_len_per_gpu: 8192
     multi_turn:
       enable: true
-      format: qwen3_coder         # Qwen3.5 writes tool calls as XML
+      format: bash                # envs.commons.tool's <bash> tags, for every model
       max_assistant_turns: 64     # a ceiling; each episode enforces its own turns
       max_tool_response_length: 4000
-      max_parallel_calls: 8       # verl's default 1 silently drops a turn's other calls
     agent:
-      num_workers: 2              # the loop itself is the method's (run.py)
+      num_workers: 2              # each runs training.loop.EpisodeLoop (loops.yaml)
 
 reward:
   num_workers: 2                  # unused (the loop grades), but verl starts them
@@ -116,12 +125,13 @@ trainer:
   logger: [console]               # training.progress sends to wandb
   project_name: cheatboxes
   experiment_name: ${oc.env:EXP,cheatboxes}
-  n_gpus_per_node: ${oc.decode:${oc.env:GPUS,1}}
+  n_gpus_per_node: 1           # the preset sets it
   nnodes: 1
   val_before_train: true
   test_freq: 10
   save_freq: 50                   # LoRA + Adam, ~15 GB per GPU at rank 512
-  total_epochs: 10
+  total_training_steps: 2500      # a new instance every time: no epochs
+  total_epochs: 1
   log_val_generations: 0
   default_local_dir: ${oc.env:RUN_DIR,runs/${trainer.experiment_name}}
   resume_mode: auto

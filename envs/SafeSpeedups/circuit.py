@@ -11,6 +11,11 @@ fingerprint; only a proof decides.
 Circuit: nodes stored in topological order, the input `x` first and the
 output last. A circuit never changes once built; everything derived
 from it is computed on first use and cached.
+
+Library: functions, each a circuit, in call order (every function after
+the functions it calls), each owned by one agent and either verified or
+not. A call runs the callee in full, so a function pays for its own
+circuit and for everything it calls.
 """
 
 from __future__ import annotations
@@ -424,3 +429,58 @@ class Circuit:
     def output_on(self, input_value, backend):
         """Compute the function's output for one input with a backend."""
         return self.evaluate(input_value, backend)[self.output_node.node_id]
+
+
+@dataclass(frozen=True)
+class Function:
+    """One library function: its circuit, its callees and its owner."""
+
+    name: str
+    circuit: Circuit
+    callees: tuple[str, ...]
+    owner: int
+    verified: bool
+
+
+@dataclass(frozen=True)
+class Library:
+    """Functions in call order: every function after all its callees."""
+
+    functions: tuple[Function, ...]
+    agent_count: int
+
+    @cached_property
+    def functions_by_name(self) -> dict[str, Function]:
+        """Map each function name to its function."""
+        return {function.name: function for function in self.functions}
+
+    @cached_property
+    def calls(self) -> tuple[tuple[str, str], ...]:
+        """List every call as (caller name, callee name)."""
+        return tuple(
+            (function.name, callee)
+            for function in self.functions
+            for callee in function.callees
+        )
+
+    @cached_property
+    def callers(self) -> dict[str, tuple[str, ...]]:
+        """Map each function name to the names of the functions calling it."""
+        callers = {function.name: [] for function in self.functions}
+        for caller, callee in self.calls:
+            callers[callee].append(caller)
+        return {name: tuple(names) for name, names in callers.items()}
+
+    @cached_property
+    def inclusive_costs(self) -> dict[str, int]:
+        """Map each function to its own cost plus its callees' costs."""
+        costs = {}
+        for function in self.functions:
+            costs[function.name] = function.circuit.cost + sum(
+                costs[callee] for callee in function.callees
+            )
+        return costs
+
+    def owned_by(self, agent: int) -> tuple[Function, ...]:
+        """Return the functions `agent` owns, in call order."""
+        return tuple(f for f in self.functions if f.owner == agent)

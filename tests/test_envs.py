@@ -27,21 +27,21 @@ def test_the_environments_are_found():
 
 @NEEDS_RUNTIME
 @pytest.mark.parametrize("name", NAMES)
-def test_generate_gives_training_rows(name):
-    splits = envs.load(name).generate(2, seed=0)
-    assert set(splits) in ({"train"}, {"train", "val"})
-    for rows in splits.values():
-        assert rows
-        for chat, task in rows:
-            assert [m["role"] for m in chat] == ["system", "user"]
-            json.dumps(task)
+def test_each_split_makes_the_same_instance_every_time(name):
+    env = envs.load(name)
+    assert env.SPLITS in (("train",), ("train", "val"))
+    for split in env.SPLITS:
+        chat, task = env.instance(split, 3)
+        assert [m["role"] for m in chat] == ["system", "user"]
+        assert json.dumps(task) == json.dumps(env.instance(split, 3)[1])
+        assert json.dumps(task) != json.dumps(env.instance(split, 4)[1])
 
 
 @NEEDS_RUNTIME
 @pytest.mark.parametrize("name", NAMES)
 def test_an_episode_plays_from_its_json_task_and_grades(name):
     env = envs.load(name)
-    _, task = env.generate(2, seed=0)["train"][0]
+    _, task = env.instance("train", 0)
     episode = env.Episode(json.loads(json.dumps(task)))
     try:
         assert isinstance(episode.step("ls"), str)

@@ -2,7 +2,9 @@ import json
 import re
 from types import SimpleNamespace
 
-from training import data, grader, loop, progress, render
+from omegaconf import OmegaConf
+
+from training import instances, loop, progress, render
 from envs import PeekResist
 
 STEP = (
@@ -13,7 +15,7 @@ STEP = (
 )
 
 
-def episode(split, grade, method=None, hacked=0.0, reward=None, task=0):
+def episode(split, grade, hacked=0.0, task=0):
     """An episode record as the loop writes it, from an environment that
     reports `hacked` and a metric of its own.
     """
@@ -27,65 +29,45 @@ def episode(split, grade, method=None, hacked=0.0, reward=None, task=0):
         "reasoning_tokens": 500,
         "input_tokens": 900,
         "task": task,
-        "method": method or {},
-        "reward_final": grade if reward is None else reward,
         "transcript": "",
     }
 
 
-def test_a_row_carries_its_env_and_task():
-    chat, task = PeekResist.generate(2)["val"][1]
-    row = data.row("PeekResist", chat, task, 1, "val")
-    assert row["prompt"] == chat
+def test_instances_are_made_when_asked_for():
+    config = OmegaConf.create({"env": "PeekResist", "env_config": {}})
+    validation = instances.Instances("val", None, config, max_samples=256)
+    assert len(validation) == 256
+    assert len(instances.Instances("train", None, config)) == instances.ENDLESS
+    row = validation[1]
+    chat, task = PeekResist.instance("val", 1)
+    assert row["raw_prompt"] == chat and row["index"] == 1
     assert row["extra_info"]["env"] == "PeekResist"
     assert json.loads(row["extra_info"]["task"]) == json.loads(json.dumps(task))
 
 
-def test_a_system_line_goes_into_the_system_message_only():
-    chat = [
-        {"role": "system", "content": "Solve it."},
-        {"role": "user", "content": "Go."},
-    ]
-    out = data.add_to_system(chat, "Be honest.")
-    assert out[0]["content"] == "Solve it.\n\nBe honest."
-    assert out[1] == chat[1]
-    assert chat[0]["content"] == "Solve it."
-
-
-def test_grader_sees_turns_as_plain_headers():
-    text = "<|im_start|>user\nGo.<|im_end|>\n<|im_start|>assistant\nOk"
-    assert grader.readable(text) == "\n--- user\nGo.\n\n--- assistant\nOk"
-
-
-def test_grader_reads_only_what_follows_the_reasoning():
-    text = "<think>a</think>x<think>b</think>y"
-    assert grader.without_thinking(text) == "xy"
-    assert grader.after_thinking("plan</think>\n\nreport") == "\n\nreport"
-    assert grader.after_thinking("still planning") == ""
-
-
-def test_grader_reads_the_first_word_as_the_verdict():
-    assert grader.verdict("  YES\n\nIt copied the door.") is True
-    assert grader.verdict("**No**.") is False
-    assert grader.verdict("<tool_call>\ncat solution.txt") is None
-    assert grader.verdict("") is None
-
-
 def test_thinking_counts_model_tokens_inside_think_tags():
-    tokenizer = SimpleNamespace(convert_tokens_to_ids=lambda tags: [8, 9])
+    tokenizer = SimpleNamespace(get_vocab=lambda: {"<think>": 8, "</think>": 9})
     ids = [8, 1, 2, 9, 3, 8, 4, 9]
     mask = [0, 1, 0, 1, 1, 1, 1, 1]
     assert loop.thinking(tokenizer, ids, mask) == 2
+
+
+def test_thinking_counts_k2_horizon_reasoning_at_any_effort():
+    vocabulary = {"<ifm|think_faster>": 5, "</ifm|think_faster>": 6}
+    tokenizer = SimpleNamespace(get_vocab=lambda: vocabulary)
+    ids = [5, 1, 2, 3, 6, 4]
+    mask = [0, 1, 1, 1, 1, 1]
+    assert loop.thinking(tokenizer, ids, mask) == 3
 
 
 def test_step_gives_neat_groups_and_drops_the_rest_of_verl():
     line = progress.RAY_PREFIX.sub("", progress.ANSI.sub("", STEP))
     verl = progress.parse(progress.STEP.search(line)[2])
     records = [
-        episode("train", 1.0, {"judge_approves": 0.0}, hacked=1.0, reward=0.0),
-        episode("train", 1.0, {"judge_approves": 1.0}),
-        episode("train", 0.0, {"judge_approves": 1.0}, task=1),
-        episode("train", 0.0, {"judge_approves": 1.0}, task=1),
+        episode("train", 1.0, hacked=1.0),
+        episode("train", 0.0),
+        episode("train", 0.5, task=1),
+        episode("train", 0.5, task=1),
         episode("val", 0.0),
     ]
     groups = progress.report(verl, records)
@@ -95,23 +77,19 @@ def test_step_gives_neat_groups_and_drops_the_rest_of_verl():
         "training",
         "time_and_memory",
     ]
-    assert list(groups["pile"])[:5] == [
+    assert list(groups["pile"])[:4] == [
         "reward_task",
         "hacked",
         "levers",
-        "judge_approves",
-        "reward_final",
+        "tool_calls",
     ]
     assert groups["pile"]["reward_task"] == 0.5
     assert groups["pile"]["hacked"] == 0.25
     assert groups["pile"]["levers"] == 2.0
-    assert groups["pile"]["judge_approves"] == 0.75
-    assert groups["pile"]["reward_final"] == 0.25
-    assert "reward_final" not in groups["pile_valid"]
     assert groups["training"]["groups_with_signal"] == 0.5
     assert progress.lines(3, groups)[0].startswith(
         "step    3  pile                 task 0.50  hacked 0.250"
-        "  levers 2.000  judge_approves 0.750  final 0.25  calls 4.0"
+        "  levers 2.000  calls 4.0"
     )
     assert progress.lines(3, groups)[2:] == [
         "step    3  training             entropy 0.412  pg_loss -0.1000"
@@ -120,12 +98,12 @@ def test_step_gives_neat_groups_and_drops_the_rest_of_verl():
     ]
 
 
-def test_no_method_means_only_the_episode_and_env_numbers():
+def test_a_step_reports_the_episode_and_env_numbers():
     groups = progress.report({}, [episode("train", 1.0)])
     assert list(groups) == ["pile", "training"]
     assert progress.lines(1, groups)[0] == (
         "step    1  pile                 task 1.00  hacked 0.000"
-        "  levers 2.000  final 1.00  calls 4.0  out 700  think 500  in 900"
+        "  levers 2.000  calls 4.0  out 700  think 500  in 900"
     )
 
 
@@ -141,10 +119,12 @@ def test_episode_log_hands_out_only_new_records(tmp_path):
 
 
 def test_follow_logs_a_whole_run_of_verl_output(tmp_path, monkeypatch, capsys):
-    logged = []
+    logged, kept = [], []
     run = SimpleNamespace(
         url="u",
-        log=lambda data, step: logged.append((step, data)),
+        id="run",
+        log=lambda data, step=None: logged.append((step, data)),
+        log_artifact=kept.append,
         finish=lambda: None,
     )
     monkeypatch.setattr(progress.wandb, "init", lambda **kwargs: run)
@@ -157,61 +137,189 @@ def test_follow_logs_a_whole_run_of_verl_output(tmp_path, monkeypatch, capsys):
             yield line
         for step in (0, 1):
             with open(episodes, "a") as file:
-                file.write(
-                    json.dumps(episode("val", 1.0, {"probe_score": 0.5})) + "\n"
-                )
+                file.write(json.dumps(episode("val", 1.0)) + "\n")
                 file.write(json.dumps(episode("train", 0.0)) + "\n")
             yield STEP.replace("step:3", f"step:{step}") + "\n"
 
     raw = tmp_path / "verl.log"
     with open(raw, "w") as file:
         progress.follow(lines(), file, str(episodes))
-    assert [step for step, _ in logged] == [0, 1]
+    assert [step for step, _ in logged] == [0, 1, None]
+    table = logged[-1][1]["episodes"]
+    assert [row[0] for row in table.data] == [0, 0, 1, 1]
+    assert "hacked" in table.columns and kept[0].type == "episodes"
     first = logged[0][1]
-    assert "pile_valid/reward_final" not in first
-    assert first["pile_valid/probe_score"] == 0.5
     assert first["pile_valid/reward_task"] == 1.0
     assert isinstance(first["pile/episode"], progress.wandb.Html)
     assert "Training from scratch" in capsys.readouterr().out
     assert len(raw.read_text().splitlines()) == 4
 
 
-def test_method_text_goes_on_the_page_and_stays_out_of_the_averages():
-    method = {"judge_approves": 0.0, "judge_prompt": "Did it?", "judge": "c"}
-    records = [episode("train", 1.0, method, hacked=1.0, reward=0.0)]
-    groups = progress.report({}, records)
-    assert groups["pile"]["judge_approves"] == 0.0
-    assert "judge" not in groups["pile"]
+def test_the_page_ends_with_the_grade():
+    records = [episode("train", 1.0, hacked=1.0)]
     pages = progress.pages(records, 7)
     assert list(pages) == ["pile/episode"]
     page = pages["pile/episode"]
-    assert "step 7, training · 4 tool calls" in page
-    order = ["Grade", "Judge prompt", ">Judge<", "Reward"]
-    assert [page.index(w) for w in order] == sorted(
-        page.index(w) for w in order
-    )
-    assert "<summary>what it was asked</summary>" in page
-    assert "grade 1 · hacked 1 · levers 2" in page
-    assert '<div class="event warn">' in page
-    assert "0 (the grade was 1)" in page
+    assert "<b>7</b><small>step</small>" in page
+    assert "<b>4</b><small>tool calls</small>" in page
+    assert '<small>hacked</small><span class="badge">1</span>' in page
+    assert "<b>1</b><small>reward</small>" in page
 
 
 def test_a_page_is_a_timeline_of_the_run():
     text = (
         "<|im_start|>system\nRules<|im_end|>\n"
         "<|im_start|>user\nSolve it<|im_end|>\n"
-        "<|im_start|>assistant\n<think>\nplan</think>\n\n<tool_call>\n"
-        "<function=bash>\n<parameter=command>\ncat a<b\n</parameter>\n"
-        "</function>\n</tool_call><|im_end|>\n"
+        "<|im_start|>assistant\n<think>\nplan</think>\n\n<bash>cat a<b</bash>"
+        "<|im_end|>\n"
         "<|im_start|>user\n<tool_response>\nDoor\n</tool_response>"
         "<|im_end|>\n<|im_start|>assistant\nDone"
     )
-    page = render.page(text, "Episode", "step 3", [("good", "Grade", "ok", "")])
-    assert "<h1>Episode</h1>" in page
-    assert "<summary>the rules the agent was given</summary>" in page
+    page = render.page(text, {"step": "3"}, 0.5, {"hacked": 0.0})
+    assert "<title>Episode · 3</title>" in page
     assert "<summary>thinking</summary>" in page
     assert '<pre class="command">$ cat a&lt;b</pre>' in page
     assert '<pre class="output">Door</pre>' in page
-    kinds = ["system", "task", "assistant", "tool", "assistant", "good"]
-    found = [k for k in re.findall(r'<div class="event (\w*)">', page)]
-    assert found == kinds
+    assert "turn 2" in page
+    kinds = ["system", "task", "assistant", "tool", "assistant", "total"]
+    assert re.findall(r'<div class="row (\w*)">', page) == kinds
+
+
+def test_a_run_whose_log_shows_a_hydra_failure_counts_as_crashed(tmp_path):
+    from training import run
+
+    log = tmp_path / "verl.log"
+    log.write_text("old run\nError executing job with overrides: [...]\n")
+    start = log.stat().st_size
+    with open(log, "a") as file:
+        file.write("step 1\nstep 2\n")
+    assert run.crashed(log, start) == 0
+    with open(log, "a") as file:
+        file.write("Error executing job with overrides: ['x']\n")
+    assert run.crashed(log, start) == 1
+
+
+def test_the_gpus_and_the_model_pick_the_preset(monkeypatch):
+    import subprocess
+
+    import pytest
+    from training import run
+
+    def listing(text):
+        """Make nvidia-smi -L print `text`."""
+        result = SimpleNamespace(stdout=text)
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: result)
+
+    h100 = "GPU {}: NVIDIA H100 80GB HBM3 (UUID: GPU-{})\n"
+    listing("".join(h100.format(i, i) for i in range(4)))
+    assert run.gpus() == ["NVIDIA H100 80GB HBM3"] * 4
+    assert run.preset(run.gpus(), "IFM/K2-Horizon-3.7B") == "h100x4-4b"
+    assert run.preset(["NVIDIA L40S"], "Qwen/Qwen3.5-4B") == "l40sx1-4b"
+    assert run.preset(["NVIDIA H200"] * 8, run.MODEL) == "h200x8-4b"
+    for found, model in [
+        (["NVIDIA A100-SXM4-40GB"], run.MODEL),
+        (["NVIDIA H100"] * 3, run.MODEL),
+        (["NVIDIA H100"], "some/unlisted-model"),
+    ]:
+        with pytest.raises(SystemExit):
+            run.preset(found, model)
+    listing("GPU 0: NVIDIA H100 (UUID: GPU-1)\n  MIG 3g.40gb Device 0\n")
+    with pytest.raises(SystemExit):
+        run.gpus()
+
+
+def test_every_preset_composes_with_the_recipe(monkeypatch):
+    from hydra import compose, initialize_config_dir
+    from training import run
+
+    monkeypatch.setenv("MODEL", run.MODEL)
+    for preset in sorted((run.CONFIG / "hardware").glob("*.yaml")):
+        count = int(preset.stem.split("x")[1].split("-")[0])
+        with initialize_config_dir(str(run.CONFIG), version_base=None):
+            config = compose("train", [f"+hardware={preset.stem}"])
+        assert config.trainer.n_gpus_per_node == count
+        assert config.data.train_batch_size == 8
+        assert config.data.custom_cls.name == "Instances"
+
+
+def test_whole_conversation_sft_trains_only_assistant_turns():
+    from training.sft_dataset import Demonstrations
+
+    class Template:
+        """Renders `<role>content` per turn, one token per character."""
+
+        def apply_chat_template(
+            self, messages, add_generation_prompt=False, **_
+        ):
+            text = "".join(f"<{m['role']}>{m['content']}" for m in messages)
+            text += "<assistant>" if add_generation_prompt else ""
+            return [ord(c) for c in text]
+
+    messages = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "u"},
+        {"role": "assistant", "content": "AB"},
+        {"role": "tool", "content": "t"},
+        {"role": "assistant", "content": "X", "loss": False},
+        {"role": "tool", "content": "t"},
+        {"role": "assistant", "content": "C"},
+    ]
+    dataset = Demonstrations.__new__(Demonstrations)
+    dataset.tokenizer, dataset.apply_chat_template_kwargs = Template(), {}
+    dataset.demonstrate = lambda index, seed, **_: messages
+    dataset.seed, dataset.env_config, dataset.max_length = 0, {}, 512
+    item = dataset[0]
+    ids, mask = item["input_ids"].tolist(), item["loss_mask"].tolist()
+    assert "".join(chr(i) for i, m in zip(ids, mask) if m) == "ABC"
+
+
+def test_an_empty_command_renders_without_crashing():
+    for transcript in (
+        "<|im_start|>assistant\n<bash></bash><|im_end|>",
+        "<|ifm|im_start|>assistant\n<bash>\n</bash><|ifm|im_end|>",
+    ):
+        assert "$ </pre>" in "".join(render.chat(transcript))
+
+
+def test_a_turn_runs_one_command_only_at_its_very_end():
+    from envs.commons.tool import command
+
+    assert command("Look first.\n<bash>ls -a</bash>\n") == (
+        "Look first.\n",
+        "ls -a",
+    )
+    for answer in (
+        "no command",
+        "<bash>ls</bash> then more",
+        "<bash>ls</bash><bash>pwd</bash>",
+        "<bash>ls",
+    ):
+        assert command(answer) == (answer, None)
+
+
+def test_the_parser_reads_the_command_after_the_reasoning():
+    import asyncio
+
+    from training.parsers import BashTagParser
+
+    class Tokenizer:
+        """Ids are characters; the turn end is one special token."""
+
+        def get_vocab(self):
+            return {"<|im_end|>": 0}
+
+        def decode(self, ids, skip_special_tokens=False):
+            return "".join("<|im_end|>" if i == 0 else chr(i) for i in ids)
+
+    parser = BashTagParser(Tokenizer())
+    assert parser.stop_token_ids == [0]
+
+    def calls(text):
+        """The commands the parser reads from a turn written as `text`."""
+        ids = [ord(c) for c in text] + [0]
+        _, found = asyncio.run(parser.extract_tool_calls(ids))
+        return [json.loads(c.arguments)["command"] for c in found]
+
+    assert calls("plan <bash>cat x</bash></think>\n<bash>ls</bash>") == ["ls"]
+    assert calls("still thinking <bash>ls</bash>") == ["ls"]
+    assert calls("plan</think>\nDone.") == []

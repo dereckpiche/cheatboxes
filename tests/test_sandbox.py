@@ -14,8 +14,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def pile(i=0):
-    """The task of the i-th training row of a small PeekResist dataset."""
-    return PeekResist.generate(2)["train"][i][1]
+    """PeekResist's i-th training task."""
+    return PeekResist.instance("train", i)[1]
 
 
 @pytest.fixture

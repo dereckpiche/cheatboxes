@@ -3,7 +3,5 @@
 import importlib.util
 
 collect_ignore = (
-    []
-    if importlib.util.find_spec("verl")
-    else ["test_training.py", "test_methods.py"]
+    [] if importlib.util.find_spec("verl") else ["test_training.py"]
 )

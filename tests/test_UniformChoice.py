@@ -18,8 +18,8 @@ LEGS = dict(source="rg:leg_counting", min_animals=1, max_animals=2)
 
 
 def pile(seed=0, **config):
-    """The first pile of a small dataset."""
-    return UniformChoice.generate(2, seed=seed, **LEGS, **config)["train"][0][1]
+    """The first pile of the seed."""
+    return UniformChoice.instance("train", 0, seed, **LEGS, **config)[1]
 
 
 def questions(task):
@@ -69,7 +69,8 @@ def test_without_tells_the_files_are_the_bare_questions():
 
 
 def test_some_but_not_all_tasks_are_activated():
-    for _, task in UniformChoice.generate(20, seed=1, **LEGS)["train"]:
+    for index in range(20):
+        _, task = UniformChoice.instance("train", index, 1, **LEGS)
         assert 1 <= len(task["activated"]) < len(task["specs"])
 
 
@@ -120,7 +121,7 @@ def test_two_episodes_share_the_forum(tmp_path, monkeypatch):
 
 
 def test_there_is_no_validation_split():
-    assert list(UniformChoice.generate(2, seed=0, **LEGS)) == ["train"]
+    assert UniformChoice.SPLITS == ("train",)
 
 
 def test_submit_ends_and_grades():
@@ -145,8 +146,8 @@ def test_an_unknown_tell_is_refused():
 
 
 def test_a_single_puzzle_takes_its_config():
-    rows = UniformChoice.generate(1, source="rg:countdown")["train"]
-    assert rows[0][1]["config"] == UniformChoice.PUZZLES["countdown"]
+    _, task = UniformChoice.instance("train", 0, source="rg:countdown")
+    assert task["config"] == UniformChoice.PUZZLES["countdown"]
 
 
 def test_closing_gives_one_last_command():

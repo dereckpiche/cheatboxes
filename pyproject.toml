@@ -12,11 +12,11 @@ dependencies = [
     "z3-solver>=4.13",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 train = [
-    "verl==0.9.1",
-    "torch==2.11.0",
-    "transformers==5.9.0",
+    "verl[verl-core] @ git+https://github.com/volcengine/verl@8c94a12d7811030413cd85e2bba6db863e0913c8",
+    "torch==2.13.0",
+    "transformers==5.16.1",
     "pyarrow>=19",
     "wandb",
     "cachetools>=7.2.0",
@@ -24,13 +24,13 @@ train = [
     "fastapi>=0.136.3",
 ]
 cuda = [
-    "verl[vllm]==0.9.1; sys_platform == 'linux'",
+    "vllm==0.32.0; sys_platform == 'linux'",
+    "tensordict>=0.8.0,<=0.10.0,!=0.9.0; sys_platform == 'linux'",
     "flash-linear-attention==0.5.2; sys_platform == 'linux'",
-    "flash-attn; sys_platform == 'linux'",
+    "flash-attn==2.8.3; sys_platform == 'linux'",
     "torchao; sys_platform == 'linux'",
 ]
 
-[dependency-groups]
 dev = [
     "black>=26.5.1",
     "pytest>=8.2",
@@ -40,14 +40,22 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["envs", "training"]
 
 [tool.uv]
-override-dependencies = ["transformers==5.9.0", "numpy>=2.0.0", "kernels>=0.12.0,<0.13"]
+default-groups = ["dev", "train", "cuda"]
+override-dependencies = ["transformers==5.16.1", "numpy>=2.0.0", "kernels>=0.12.0,<0.13"]
+
+[[tool.uv.dependency-metadata]]
+name = "TransferQueue"
+requires-dist = []
 
 [tool.uv.sources]
-flash-attn = { url = "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu13torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" }
+flash-attn = { index = "verl-wheelhouse", marker = "sys_platform == 'linux'" }
 torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
 torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
 torchaudio = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
@@ -55,6 +63,11 @@ torchaudio = [{ index = "pytorch-cu130", marker = "sys_platform == 'linux'" }]
 [[tool.uv.index]]
 name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "verl-wheelhouse"
+url = "https://verl-project.github.io/verl-wheelhouse/cu130/torch2.13/simple/"
 explicit = true
 
 [tool.black]
@@ -68,3 +81,44 @@ pythonpath = ["."]
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+
+[tool.cluv]
+job_script_path = "scripts/job.sh"
+project_dir = "$SCRATCH/cheatboxes"
+results_path = "$SCRATCH/logs/cheatboxes"
+results_symlink = "logs"
+
+[tool.cluv.env]
+UV_OFFLINE = "1"
+HF_HUB_OFFLINE = "1"
+WANDB_MODE = "online"
+SANDBOX_RUNTIME = "apptainer"
+SANDBOX_IMAGE = "$SCRATCH/cache/apptainer/python-3.12-slim.sif"
+
+[tool.cluv.sbatch_args]
+requeue = true
+
+[tool.cluv.clusters.mila]
+env = { SANDBOX_RUNTIME = "podman", SANDBOX_IMAGE = "docker.io/library/python:3.12-slim" }
+sbatch_args = { partition = "long", gpus = "l40s:1", cpus-per-gpu = 12, mem-per-gpu = "250G" }
+
+[tool.cluv.clusters.fir]
+sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 12, mem-per-gpu = "280G" }
+
+[tool.cluv.clusters.rorqual]
+env = { WANDB_MODE = "offline" }
+sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 16, mem-per-gpu = "124G" }
+
+[tool.cluv.clusters.nibi]
+sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 14, mem-per-gpu = "250G" }
+
+[tool.cluv.clusters.trillium-gpu]
+env = { WANDB_MODE = "offline" }
+sbatch_args = { account = "rrg-bengioy-ad", gpus-per-node = 1 }
+
+[tool.cluv.clusters.tamia]
+env = { WANDB_MODE = "offline" }
+sbatch_args = { account = "aip-courvill", gpus = "h100:4", cpus-per-gpu = 12, mem-per-gpu = "120G" }
+
+[tool.cluv.clusters.killarney]
+sbatch_args = { account = "aip-courvill", gpus = "l40s:1", cpus-per-gpu = 16, mem-per-gpu = "125G" }

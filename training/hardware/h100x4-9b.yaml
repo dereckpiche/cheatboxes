@@ -1,0 +1,19 @@
+# @package _global_
+# 4 H100 (80 GB), a 9B model: one vLLM replica per GPU at half the GPU; the
+# actor's weights and Adam wait in CPU memory between updates. Evaluated
+# (val_only) first.
+
+trainer:
+  n_gpus_per_node: 4
+
+actor_rollout_ref:
+  actor:
+    fsdp_config:
+      model_dtype: bf16
+      param_offload: true
+      optimizer_offload: true
+  ref:
+    fsdp_config:
+      model_dtype: bf16
+  rollout:
+    gpu_memory_utilization: 0.5

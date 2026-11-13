@@ -68,7 +68,7 @@ training episodes measure what a held-out set would.
 
 ### Settings
 
-`generate(n, seed, **config)` takes:
+`instance(split, index, seed=0, **config)` makes one instance on demand and takes:
 
 | setting | default | what it does |
 |---|---|---|
@@ -87,7 +87,7 @@ forum lives on the host.
 
 | file | what it holds |
 |---|---|
-| `__init__.py` | `generate`, the puzzle sizes and the pile layout |
+| `__init__.py` | `instance`, the puzzle sizes and the pile layout |
 | `tells.py` | the tell primitives, and how a pair is drawn |
 | `episode.py` | `Episode`: the sandbox and the forum, `submit` and the grade |
 | `prompts.py` | the system prompt and the closing message |

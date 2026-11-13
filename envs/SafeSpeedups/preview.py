@@ -1,20 +1,21 @@
-"""Show programs: Python source, the HTML page, and the command line.
+"""Show programs: Python source, the HTML pages, and the command line.
 
 python -m envs.SafeSpeedups.preview generate --count 100
 python -m envs.SafeSpeedups.preview stats data/SafeSpeedups/programs
 python -m envs.SafeSpeedups.preview html data/SafeSpeedups/programs
+python -m envs.SafeSpeedups.preview library --count 3
+python -m envs.SafeSpeedups.preview library-html data/SafeSpeedups/libraries
 
-Rendered source calls an `ops` object (see `runtime_operations`); every
-gate starts with `OPERATION_PREFIX` (`ops.p_and`), since `and`, `or`
-and `not` alone are Python keywords. Masked operations render as the
-plain gate on a constant (`ops.p_and(v1, 0x0000ffff)`), so and, or and
-xor accept a value or an integer constant as their second operand.
+Source rendering lives in `episode`, next to the parser it must match.
 
 The page shows code, graph and statistics. It carries every node's
 values on a sample of random inputs; a button switches to another one.
 Hovering a node or a code line highlights it with its operands and
 readers. The statistics name the redundant nodes: those proven equal
 to an earlier node.
+
+A library gets an index page: its call graph, callers above callees,
+each function a link to its own page, which shows its calls first.
 """
 
 from __future__ import annotations
@@ -23,7 +24,6 @@ import argparse
 import html
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from envs.SafeSpeedups.analysis import (
     PairMatrix,
@@ -34,79 +34,31 @@ from envs.SafeSpeedups.analysis import (
 )
 from envs.SafeSpeedups.circuit import (
     EDGE_INPUTS,
-    OPERATION_PREFIX,
     OPERATIONS,
     Circuit,
+    Function,
+    Library,
     Node,
 )
+from envs.SafeSpeedups.episode import node_names, render_call
 from envs.SafeSpeedups.generation import (
+    LIBRARY_DIRECTORY,
     PROGRAM_DIRECTORY,
     GenerationConfig,
+    LibraryConfig,
     Program,
+    SavedLibrary,
     generate_function,
+    generate_library,
+    library_name,
+    library_paths,
+    load_library,
     load_program,
     program_name,
     program_paths,
+    save_library,
     save_program,
 )
-
-
-def node_names(circuit: Circuit) -> dict[int, str]:
-    """Name the input `x` and every other node `v<position>`."""
-    names = {circuit.input_node.node_id: "x"}
-    for position, node in enumerate(circuit.nodes[1:], start=1):
-        names[node.node_id] = f"v{position}"
-    return names
-
-
-def render_call(node: Node, names: dict[int, str]) -> str:
-    """Write one node's operation as an `ops.<name>(...)` call."""
-    operation = OPERATIONS[node.operation]
-    arguments = [names[source_id] for source_id in node.operands]
-    arguments += [operation.render_parameter(p) for p in node.parameters]
-    return f"ops.{operation.call_name}({', '.join(arguments)})"
-
-
-def to_python(circuit: Circuit, function_name: str = "f") -> str:
-    """Write the circuit as a Python function, one line per node."""
-    names = node_names(circuit)
-    lines = [f"def {function_name}(x):"]
-    for node in circuit.nodes[1:]:
-        lines.append(f"    {names[node.node_id]} = {render_call(node, names)}")
-    lines.append(f"    return {names[circuit.output_node.node_id]}")
-    return "\n".join(lines) + "\n"
-
-
-def runtime_operations(backend) -> SimpleNamespace:
-    """Build the `ops` that rendered code calls, computed with `backend`."""
-
-    def as_value(argument):
-        """Turn an integer constant into a backend value; keep values."""
-        if isinstance(argument, int):
-            return backend.constant(argument)
-        return argument
-
-    def gate(name: str):
-        """Return a function computing the named operation's meaning."""
-        return lambda *operands: OPERATIONS[name].meaning(backend, *operands)
-
-    gates = {
-        "not": backend.bitwise_not,
-        "and": lambda a, b: backend.bitwise_and(a, as_value(b)),
-        "or": lambda a, b: backend.bitwise_or(a, as_value(b)),
-        "xor": lambda a, b: backend.bitwise_xor(a, as_value(b)),
-        "andn": gate("andn"),
-        "rotl": backend.rotl,
-        "lshr": backend.lshr,
-        "shl": backend.shl,
-        "mux": gate("mux"),
-        "maj": gate("maj"),
-        "chi": gate("chi"),
-    }
-    return SimpleNamespace(
-        **{OPERATION_PREFIX + name: compute for name, compute in gates.items()}
-    )
-
 
 LAYER_GAP = 80
 NODE_GAP = 92
@@ -144,10 +96,10 @@ SVG_SYMBOLS: dict[str, str] = {
 
 STYLE = """
 :root { --ink: #1a1a1a; --muted: #8a8a8a; --faint: #d6d6d6;
-        --paper: #ffffff; --wash: #f6f6f4; }
+        --paper: #ffffff; --wash: #f6f6f4; --locked: #ebebe7; }
 @media (prefers-color-scheme: dark) {
   :root { --ink: #e8e8e8; --muted: #8f8f8f; --faint: #3a3a3a;
-          --paper: #141414; --wash: #1c1c1c; }
+          --paper: #141414; --wash: #1c1c1c; --locked: #262626; }
 }
 body { background: var(--paper); color: var(--ink); margin: 0;
        font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, sans-serif; }
@@ -160,13 +112,21 @@ h2 { margin-top: 40px; font-size: 18px; }
 button { font: inherit; color: var(--ink); background: var(--wash);
          border: 1px solid var(--faint); border-radius: 6px;
          padding: 3px 12px; cursor: pointer; }
-.code { display: grid; grid-template-columns: auto auto; gap: 0 32px;
+.code { display: grid; grid-template-columns: auto auto; gap: 0;
         justify-content: center; background: var(--wash);
         padding: 14px 18px; border-radius: 6px; overflow-x: auto;
         font: 13px/1.6 ui-monospace, Menlo, monospace; }
 .line { display: contents; }
 .line > * { white-space: pre; padding: 0 6px; border-radius: 3px; }
-.line .value { color: var(--muted); }
+.line .value { color: var(--muted); padding-left: 32px; }
+.section { grid-column: 1 / -1; padding: 12px 10px 5px;
+           font: 600 10.5px/1 -apple-system, Helvetica, sans-serif;
+           letter-spacing: 0.09em; text-transform: uppercase;
+           color: var(--muted); }
+.line.fixed > *, .line.editable > * { border-radius: 0; }
+.line.fixed > * { background: var(--locked); color: var(--muted); }
+.line.fixed > :first-child { box-shadow: inset 2px 0 var(--faint); }
+.line.editable > :first-child { box-shadow: inset 2px 0 var(--ink); }
 .line.focus > * { background: var(--faint); }
 .line.near > * { background: var(--faint); opacity: 0.7; }
 .graph { overflow-x: auto; text-align: center; }
@@ -186,12 +146,19 @@ svg .node.focus rect { stroke: var(--ink); stroke-width: 2.2; }
 svg .node.near rect { stroke: var(--ink); stroke-width: 1.4; }
 .statistics { text-align: center; }
 .statistics .muted { color: var(--muted); }
+.context { text-align: center; color: var(--muted); }
+a { color: var(--ink); }
+svg a { cursor: pointer; }
+svg .verified rect { stroke: var(--ink); stroke-width: 1.6; }
+svg .verified .name { font-weight: 700; }
+.agents { margin: 0 auto; border-collapse: collapse; }
+.agents td { padding: 3px 14px; vertical-align: top; }
+.agents td:first-child { color: var(--muted); text-align: right; }
 """
 
-SCRIPT = """
+FOCUS_SCRIPT = """
 const neighbours = JSON.parse(
   document.getElementById("neighbours").textContent);
-const samples = JSON.parse(document.getElementById("samples").textContent);
 function setFocus(id, on) {
   const near = neighbours[id] || [];
   document.querySelectorAll(`[data-node="${id}"]`)
@@ -205,6 +172,11 @@ document.querySelectorAll("[data-node]").forEach(el => {
   el.addEventListener("mouseenter", () => setFocus(el.dataset.node, true));
   el.addEventListener("mouseleave", () => setFocus(el.dataset.node, false));
 });
+"""
+"""Highlight a hovered node with its neighbours and the edges between."""
+
+SAMPLE_SCRIPT = """
+const samples = JSON.parse(document.getElementById("samples").textContent);
 const hex = value => "0x" + value.toString(16).padStart(8, "0");
 function showSample(index) {
   for (const [id, values] of Object.entries(samples)) {
@@ -217,6 +189,155 @@ document.getElementById("random").addEventListener("click", () => {
   showSample(Math.floor(Math.random() * count));
 });
 """
+"""Show every node's value on another random input when asked."""
+
+
+D3_URL = "https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"
+
+GRAPH_STYLE = """
+:root { --green: #14683b; --green-wash: #e6f2ea; --box: #fafaf8;
+        --box-line: #d4d4d0; }
+@media (prefers-color-scheme: dark) {
+  :root { --green: #5fb383; --green-wash: #1b2e22; --box: #1a1a1a;
+          --box-line: #333; }
+}
+#call-graph { display: block; margin: 0 auto; max-width: 100%;
+              font-family: Georgia, serif; }
+#call-graph .sandbox { fill: var(--box); stroke: var(--box-line); }
+#call-graph .sandbox-label { fill: var(--muted); font-size: 13px;
+                             font-style: italic; text-anchor: start; }
+#call-graph .call { fill: none; stroke: var(--muted); stroke-width: 1.1;
+                    marker-end: url(#arrow-plain); }
+#call-graph .call.from-verified { stroke: var(--green); stroke-width: 1.8;
+                                  marker-end: url(#arrow-green); }
+#call-graph #arrow-plain path { fill: var(--muted); }
+#call-graph #arrow-green path { fill: var(--green); }
+#call-graph rect.function { fill: var(--paper); stroke: var(--muted);
+                            stroke-dasharray: 4 3; cursor: pointer; }
+#call-graph rect.function.verified { fill: var(--green-wash);
+                                     stroke: var(--green); stroke-width: 2;
+                                     stroke-dasharray: none; }
+#call-graph text.name { fill: var(--ink); font-size: 14px;
+                        text-anchor: middle; pointer-events: none; }
+#call-graph .dim { opacity: 0.15; }
+"""
+"""The README's look: agent sandboxes, green verified functions."""
+
+GRAPH_SCRIPT = """
+const data = JSON.parse(document.getElementById("graph-data").textContent);
+const columns = Math.ceil(Math.sqrt(data.agents));
+const rows = Math.ceil(data.agents / columns);
+const perAgent = d3.max(d3.rollup(data.nodes, v => v.length, d => d.owner),
+                        ([, count]) => count);
+const cellHeight = 170 + 26 * perAgent, cellWidth = cellHeight * 1.35;
+const gap = 10, pad = 16, labelSpace = 26;
+const width = columns * (cellWidth + gap) + gap;
+const height = rows * (cellHeight + gap) + gap;
+const svg = d3.select("#call-graph").attr("viewBox", [0, 0, width, height])
+  .attr("width", width);
+const defs = svg.append("defs");
+for (const id of ["arrow-plain", "arrow-green"]) {
+  defs.append("marker").attr("id", id).attr("viewBox", "0 0 10 10")
+    .attr("refX", 9).attr("refY", 5).attr("markerWidth", 6)
+    .attr("markerHeight", 6).attr("orient", "auto")
+    .append("path").attr("d", "M0,0 L10,5 L0,10 z");
+}
+const sandbox = agent => {
+  const column = agent % columns, row = Math.floor(agent / columns);
+  const x = gap + column * (cellWidth + gap);
+  const y = gap + row * (cellHeight + gap);
+  return {x, y, cx: x + cellWidth / 2, cy: y + (cellHeight + labelSpace) / 2};
+};
+const boxes = d3.range(data.agents).map(agent => ({agent, ...sandbox(agent)}));
+svg.append("g").selectAll("rect").data(boxes).join("rect")
+  .attr("class", "sandbox").attr("rx", 10)
+  .attr("x", d => d.x).attr("y", d => d.y)
+  .attr("width", cellWidth).attr("height", cellHeight);
+svg.append("g").selectAll("text").data(boxes).join("text")
+  .attr("class", "sandbox-label").attr("x", d => d.x + 12)
+  .attr("y", d => d.y + 22).text(d => `Agent ${d.agent} sandbox`);
+const size = d => {
+  const scale = Math.sqrt(1 + d.degree);
+  return {w: 22 + 9 * scale, h: 16 + 5 * scale};
+};
+const verifiedNames = new Set(
+  data.nodes.filter(d => d.verified).map(d => d.id));
+const call = svg.append("g").selectAll("path").data(data.links).join("path")
+  .attr("class", l => verifiedNames.has(l.source)
+    ? "call from-verified" : "call");
+const node = svg.append("g").selectAll("g").data(data.nodes).join("g");
+node.append("rect").attr("rx", 7)
+  .attr("class", d => d.verified ? "function verified" : "function")
+  .attr("x", d => -size(d).w / 2).attr("y", d => -size(d).h / 2)
+  .attr("width", d => size(d).w).attr("height", d => size(d).h);
+node.append("text").attr("class", "name").attr("dy", "0.35em")
+  .text(d => d.id);
+node.append("title").text(d =>
+  `${d.id} · agent ${d.owner} · ${d.verified ? "verified" : "unverified"}`
+  + ` · ${d.degree} calls in and out · cost with calls ${d.cost}`);
+const neighbours = new Map(data.nodes.map(d => [d.id, new Set([d.id])]));
+data.links.forEach(l => {
+  neighbours.get(l.source).add(l.target);
+  neighbours.get(l.target).add(l.source);
+});
+data.nodes.forEach(d => {
+  const home = sandbox(d.owner);
+  d.x = home.cx + (Math.random() - 0.5) * 40;
+  d.y = home.cy + (Math.random() - 0.5) * 40;
+});
+function keepInside(d) {
+  const home = sandbox(d.owner), {w, h} = size(d);
+  d.x = Math.max(home.x + pad + w / 2,
+                 Math.min(home.x + cellWidth - pad - w / 2, d.x));
+  d.y = Math.max(home.y + labelSpace + pad + h / 2,
+                 Math.min(home.y + cellHeight - pad - h / 2, d.y));
+}
+function edgePoint(from, to) {
+  const {w, h} = size(to), dx = from.x - to.x, dy = from.y - to.y;
+  const scale = 1 / Math.max(Math.abs(dx) / (w / 2 + 3),
+                             Math.abs(dy) / (h / 2 + 3), 1e-9);
+  return [to.x + dx * scale, to.y + dy * scale];
+}
+function curve(l) {
+  const [x1, y1] = edgePoint(l.target, l.source);
+  const [x2, y2] = edgePoint(l.source, l.target);
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+  const bend = 0.18;
+  return `M${x1},${y1} Q${mx - (y2 - y1) * bend},${my + (x2 - x1) * bend}`
+    + ` ${x2},${y2}`;
+}
+const simulation = d3.forceSimulation(data.nodes)
+  .force("link", d3.forceLink(data.links).id(d => d.id)
+    .distance(70).strength(l => l.source.owner === l.target.owner ? 0.3 : 0.02))
+  .force("charge", d3.forceManyBody().strength(-260))
+  .force("collide", d3.forceCollide(d => size(d).w / 2 + 8))
+  .force("x", d3.forceX(d => sandbox(d.owner).cx).strength(0.08))
+  .force("y", d3.forceY(d => sandbox(d.owner).cy).strength(0.08))
+  .on("tick", () => {
+    data.nodes.forEach(keepInside);
+    call.attr("d", curve);
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  });
+node.on("mouseenter", (event, d) => {
+  const near = neighbours.get(d.id);
+  node.classed("dim", n => !near.has(n.id));
+  call.classed("dim", l => l.source.id !== d.id && l.target.id !== d.id);
+}).on("mouseleave", () => {
+  node.classed("dim", false);
+  call.classed("dim", false);
+}).on("click", (event, d) => { window.location.href = `${d.id}.html`; });
+node.call(d3.drag()
+  .on("start", (event, d) => {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x; d.fy = d.y;
+  })
+  .on("drag", (event, d) => { d.fx = event.x; d.fy = event.y; })
+  .on("end", (event, d) => {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null; d.fy = null;
+  }));
+"""
+"""Sandboxes in a grid; each agent's functions settle in its sandbox."""
 
 
 def svg_symbol(node: Node) -> str:
@@ -227,32 +348,66 @@ def svg_symbol(node: Node) -> str:
     return symbol
 
 
-def layout(circuit: Circuit) -> dict[int, tuple[float, float]]:
-    """Place nodes in layers by depth, ordered by their operands' mean x."""
-    layers: dict[int, list[int]] = {}
-    for node in circuit.nodes:
-        layers.setdefault(circuit.depths[node.node_id], []).append(node.node_id)
-    widest = max(len(ids) for ids in layers.values())
+def layered_layout(
+    order: list, parents: dict
+) -> dict[object, tuple[float, float]]:
+    """Place keys in layers by longest path from a root, parents above.
+
+    `order` lists every key after all its parents; within a layer, keys
+    sit in the order of their parents' mean x.
+    """
+    depth: dict = {}
+    for key in order:
+        depth[key] = 1 + max((depth[p] for p in parents[key]), default=-1)
+    layers: dict[int, list] = {}
+    for key in order:
+        layers.setdefault(depth[key], []).append(key)
+    widest = max(len(keys) for keys in layers.values())
     width = 2 * MARGIN + widest * NODE_GAP
-    places: dict[int, tuple[float, float]] = {}
-    for depth in sorted(layers):
-        ids = layers[depth]
-        ids.sort(key=lambda node_id: mean_operand_x(circuit, node_id, places))
-        left = (width - len(ids) * NODE_GAP) / 2 + NODE_GAP / 2
-        for index, node_id in enumerate(ids):
-            y = MARGIN + NODE_HEIGHT / 2 + depth * LAYER_GAP
-            places[node_id] = (left + index * NODE_GAP, y)
+    places: dict = {}
+    for level in sorted(layers):
+        keys = layers[level]
+        keys.sort(key=lambda k: mean_parent_x(parents[k], places))
+        left = (width - len(keys) * NODE_GAP) / 2 + NODE_GAP / 2
+        for index, key in enumerate(keys):
+            y = MARGIN + NODE_HEIGHT / 2 + level * LAYER_GAP
+            places[key] = (left + index * NODE_GAP, y)
     return places
 
 
-def mean_operand_x(
-    circuit: Circuit, node_id: int, places: dict[int, tuple[float, float]]
-) -> float:
-    """Return the mean x of a node's placed operands, or 0 for the input."""
-    operands = circuit.nodes_by_id[node_id].operands
-    if not operands:
+def mean_parent_x(parents, places: dict) -> float:
+    """Return the mean x of placed parents, or 0 for a root."""
+    if not parents:
         return 0.0
-    return sum(places[source_id][0] for source_id in operands) / len(operands)
+    return sum(places[p][0] for p in parents) / len(parents)
+
+
+def edge_path(
+    source: tuple[float, float], destination: tuple[float, float]
+) -> str:
+    """Return the d attribute of a curve from a box's bottom to another's top."""
+    (x1, y1), (x2, y2) = source, destination
+    y1, y2 = y1 + NODE_HEIGHT / 2, y2 - NODE_HEIGHT / 2
+    bend = (y2 - y1) / 2
+    return (
+        f"M{x1:.1f},{y1:.1f} C{x1:.1f},{y1 + bend:.1f} "
+        f"{x2:.1f},{y2 - bend:.1f} {x2:.1f},{y2:.1f}"
+    )
+
+
+def svg_size(places: dict) -> str:
+    """Return the opening svg tag sized to hold every placed box."""
+    width = max(x for x, _ in places.values()) + NODE_GAP / 2 + MARGIN
+    height = max(y for _, y in places.values()) + NODE_HEIGHT / 2 + MARGIN
+    return f'<svg width="{width:.0f}" height="{height:.0f}">'
+
+
+def box(x: float, y: float) -> str:
+    """Return a node's rounded rectangle centred on (x, y)."""
+    return (
+        f'<rect x="{x - NODE_WIDTH / 2:.1f}" y="{y - NODE_HEIGHT / 2:.1f}" '
+        f'width="{NODE_WIDTH}" height="{NODE_HEIGHT}" rx="6"/>'
+    )
 
 
 def hex_word(value: int) -> str:
@@ -276,28 +431,55 @@ def value_span(node_id: int, value: int) -> str:
     )
 
 
+def section_label(text: str) -> str:
+    """Return a small heading row that opens a block of the code."""
+    return f'<div class="section">{html.escape(text)}</div>'
+
+
+def code_row(source: str, kind: str, node_id=None, value=None) -> str:
+    """Return one code line; `kind` is "", "fixed" or "editable"."""
+    node = "" if node_id is None else f' data-node="{node_id}"'
+    tail = "<span></span>" if value is None else value_span(node_id, value)
+    classes = f"line {kind}".strip()
+    return f'<div class="{classes}"{node}><span>{source}</span>{tail}</div>'
+
+
 def code_lines(
-    circuit: Circuit, title: str, names: dict[int, str], first: dict[int, int]
+    circuit: Circuit,
+    title: str,
+    names: dict[int, str],
+    first: dict[int, int],
+    calls: tuple[str, ...] | None = None,
 ) -> str:
-    """Write the source, one line per node, each with its current value."""
+    """Write the source, one line per node, each with its current value.
+
+    For a library function, `calls` names its callees: they come first,
+    one `callee(x)` line each linked to the callee's page, in a shaded
+    block headed "calls · can't edit"; the circuit follows under "body ·
+    can edit", the only part its owner may change.
+    """
     input_id = circuit.input_node.node_id
+    in_library = calls is not None
+    body = "editable" if in_library else ""
     rows = [
-        f'<div class="line" data-node="{input_id}">'
-        f"<span>def {html.escape(title)}(x):</span>"
-        f"{value_span(input_id, first[input_id])}</div>"
+        code_row(f"def {html.escape(title)}(x):", "", input_id, first[input_id])
     ]
+    if calls:
+        rows.append(section_label("calls · can't edit"))
+    for callee in calls or ():
+        link = f'<a href="{page_name(callee)}">{html.escape(callee)}</a>'
+        rows.append(code_row(f"    {link}(x)", "fixed"))
+    if in_library:
+        rows.append(section_label("body · can edit"))
     for node in circuit.nodes[1:]:
         source = f"    {names[node.node_id]} = {render_call(node, names)}"
         rows.append(
-            f'<div class="line" data-node="{node.node_id}">'
-            f"<span>{html.escape(source)}</span>"
-            f"{value_span(node.node_id, first[node.node_id])}</div>"
+            code_row(
+                html.escape(source), body, node.node_id, first[node.node_id]
+            )
         )
     output_name = names[circuit.output_node.node_id]
-    rows.append(
-        f'<div class="line"><span>    return {output_name}</span>'
-        "<span></span></div>"
-    )
+    rows.append(code_row(f"    return {output_name}", body))
     return f'<div class="code">{"".join(rows)}</div>'
 
 
@@ -305,19 +487,15 @@ def svg_graph(
     circuit: Circuit, names: dict[int, str], first: dict[int, int]
 ) -> str:
     """Draw the circuit as an SVG: name, operation and value per node."""
-    places = layout(circuit)
-    width = max(x for x, _ in places.values()) + NODE_GAP / 2 + MARGIN
-    height = max(y for _, y in places.values()) + NODE_HEIGHT / 2 + MARGIN
-    parts = [f'<svg width="{width:.0f}" height="{height:.0f}">', ARROW_MARKERS]
+    places = layered_layout(
+        [node.node_id for node in circuit.nodes],
+        {node.node_id: node.operands for node in circuit.nodes},
+    )
+    parts = [svg_size(places), ARROW_MARKERS]
     for source_id, destination_id, _ in circuit.edges:
-        x1, y1 = places[source_id]
-        x2, y2 = places[destination_id]
-        y1, y2 = y1 + NODE_HEIGHT / 2, y2 - NODE_HEIGHT / 2
-        bend = (y2 - y1) / 2
         parts.append(
             f'<path data-from="{source_id}" data-to="{destination_id}" '
-            f'd="M{x1:.1f},{y1:.1f} C{x1:.1f},{y1 + bend:.1f} '
-            f'{x2:.1f},{y2 - bend:.1f} {x2:.1f},{y2:.1f}"/>'
+            f'd="{edge_path(places[source_id], places[destination_id])}"/>'
         )
     for node in circuit.nodes:
         x, y = places[node.node_id]
@@ -326,9 +504,7 @@ def svg_graph(
         symbol = svg_symbol(node) if node.operands else "input"
         parts.append(
             f'<g class="{classes}" data-node="{node.node_id}">'
-            f"<title>{html.escape(name)}</title>"
-            f'<rect x="{x - NODE_WIDTH / 2:.1f}" y="{y - NODE_HEIGHT / 2:.1f}" '
-            f'width="{NODE_WIDTH}" height="{NODE_HEIGHT}" rx="6"/>'
+            f"<title>{html.escape(name)}</title>{box(x, y)}"
             f'<text class="name" x="{x:.1f}" y="{y - 8:.1f}">{name}</text>'
             f'<text class="symbol" x="{x:.1f}" y="{y + 5:.1f}">'
             f"{html.escape(symbol)}</text>"
@@ -368,8 +544,19 @@ def neighbour_map(circuit: Circuit) -> dict[int, list[int]]:
     }
 
 
-def to_html(circuit: Circuit, title: str, matrix: PairMatrix) -> str:
-    """Render the page for one program: code, graph, then statistics."""
+def to_html(
+    circuit: Circuit,
+    title: str,
+    matrix: PairMatrix,
+    context: str = "",
+    calls: tuple[str, ...] | None = None,
+) -> str:
+    """Render the page for one program: code, graph, then statistics.
+
+    `context` is HTML placed under the subtitle; `calls`, given for a
+    library function, are the functions it calls, shown first in its
+    code.
+    """
     names = node_names(circuit)
     samples = sample_values(circuit)
     first = {node_id: values[0] for node_id, values in samples.items()}
@@ -385,9 +572,10 @@ def to_html(circuit: Circuit, title: str, matrix: PairMatrix) -> str:
 <body><main>
 <h1>{html.escape(title)}</h1>
 <p class="subtitle">{subtitle}</p>
+{context}
 <h2>Code</h2>
 <p class="controls"><button id="random">random input</button></p>
-{code_lines(circuit, title, names, first)}
+{code_lines(circuit, title, names, first, calls)}
 <h2>Graph</h2>
 <div class="graph">{svg_graph(circuit, names, first)}</div>
 <h2>Statistics</h2>
@@ -395,9 +583,124 @@ def to_html(circuit: Circuit, title: str, matrix: PairMatrix) -> str:
 </main>
 <script type="application/json" id="neighbours">{json.dumps(neighbour_map(circuit))}</script>
 <script type="application/json" id="samples">{json.dumps(samples)}</script>
-<script>{SCRIPT}</script>
+<script>{FOCUS_SCRIPT}{SAMPLE_SCRIPT}</script>
 </body></html>
 """
+
+
+def page_name(function_name: str) -> str:
+    """Return the file name of a library function's page."""
+    return f"{function_name}.html"
+
+
+def role(function: Function) -> str:
+    """Say whether a function is verified."""
+    return "verified" if function.verified else "unverified"
+
+
+def function_links(names) -> str:
+    """Write function names as links to their pages, comma-separated."""
+    links = [f'<a href="{page_name(n)}">{html.escape(n)}</a>' for n in names]
+    return ", ".join(links) or "none"
+
+
+def function_context(library: Library, function: Function) -> str:
+    """Write a function's place in its library: owner, role and calls."""
+    cost = library.inclusive_costs[function.name]
+    return (
+        '<p class="context"><a href="index.html">library</a>'
+        f" · agent {function.owner} · {role(function)}"
+        f" · cost with calls {cost}<br>"
+        f"calls {function_links(function.callees)}"
+        f" · called by {function_links(library.callers[function.name])}</p>"
+    )
+
+
+def agent_table(library: Library) -> str:
+    """List each agent's verified and unverified functions as links."""
+    rows = []
+    for agent in range(library.agent_count):
+        owned = library.owned_by(agent)
+        verified = [f.name for f in owned if f.verified]
+        unverified = [f.name for f in owned if not f.verified]
+        rows.append(
+            f"<tr><td>agent {agent}</td>"
+            f"<td>verified: {function_links(verified)}</td>"
+            f"<td>unverified: {function_links(unverified)}</td></tr>"
+        )
+    return f'<table class="agents">{"".join(rows)}</table>'
+
+
+def graph_data(library: Library) -> dict:
+    """Return the nodes and links the force-directed view draws."""
+    nodes = [
+        {
+            "id": f.name,
+            "owner": f.owner,
+            "verified": f.verified,
+            "degree": len(f.callees) + len(library.callers[f.name]),
+            "cost": library.inclusive_costs[f.name],
+        }
+        for f in library.functions
+    ]
+    links = [
+        {"source": caller, "target": callee} for caller, callee in library.calls
+    ]
+    return {"agents": library.agent_count, "nodes": nodes, "links": links}
+
+
+def library_index(saved: SavedLibrary) -> str:
+    """Render a library's index page: its call graph and its agents."""
+    library = saved.library
+    cross_agent = sum(
+        library.functions_by_name[caller].owner
+        != library.functions_by_name[callee].owner
+        for caller, callee in library.calls
+    )
+    subtitle = (
+        f"{len(library.functions)} functions · {len(library.calls)} calls"
+        f" ({cross_agent} across agents) · {library.agent_count} agents"
+    )
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(saved.name)}</title>
+<script src="{D3_URL}"></script>
+<style>{STYLE}{GRAPH_STYLE}</style></head>
+<body><main>
+<h1>{html.escape(saved.name)}</h1>
+<p class="subtitle">{subtitle}</p>
+</main>
+<svg id="call-graph"></svg>
+<main>
+<p class="note">green: verified, and calls made by verified functions ·
+dashed: unverified · box size: calls in and out · arrows point to the
+callee · drag to move, click to open</p>
+<h2>Agents</h2>
+{agent_table(library)}
+</main>
+<script type="application/json" id="graph-data">{json.dumps(graph_data(library))}</script>
+<script>{GRAPH_SCRIPT}</script>
+</body></html>
+"""
+
+
+def write_library_pages(saved: SavedLibrary, directory: Path) -> Path:
+    """Write a library's index and one page per function; return the index."""
+    directory.mkdir(parents=True, exist_ok=True)
+    library = saved.library
+    for function in library.functions:
+        page = to_html(
+            function.circuit,
+            function.name,
+            pair_matrix(function.circuit),
+            function_context(library, function),
+            function.callees,
+        )
+        (directory / page_name(function.name)).write_text(page)
+    index = directory / "index.html"
+    index.write_text(library_index(saved))
+    return index
 
 
 def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
@@ -420,6 +723,34 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_library_arguments(parser: argparse.ArgumentParser) -> None:
+    """Declare the `library` command's seeds, output and graph knobs."""
+    defaults = LibraryConfig()
+    parser.add_argument("--count", type=int, default=1)
+    parser.add_argument("--start", type=int, default=0)
+    parser.add_argument("--out", type=Path, default=LIBRARY_DIRECTORY)
+    parser.add_argument(
+        "--functions", type=int, default=defaults.function_count
+    )
+    parser.add_argument("--agents", type=int, default=defaults.agent_count)
+    parser.add_argument(
+        "--callees", type=float, default=defaults.expected_callees
+    )
+    parser.add_argument(
+        "--callers", type=float, default=defaults.expected_callers
+    )
+    parser.add_argument(
+        "--global-bias", type=float, default=defaults.global_bias
+    )
+    parser.add_argument(
+        "--local-scale", type=float, default=defaults.local_scale
+    )
+    parser.add_argument("--group-bias", type=float, default=defaults.group_bias)
+    parser.add_argument(
+        "--verified", type=float, default=defaults.verified_probability
+    )
+
+
 def parse_arguments() -> argparse.Namespace:
     """Read the command line: one of generate, stats or html."""
     parser = argparse.ArgumentParser(description="SafeSpeedups programs.")
@@ -433,6 +764,13 @@ def parse_arguments() -> argparse.Namespace:
     page = commands.add_parser("html", help="render saved programs")
     page.add_argument("paths", nargs="+", type=Path)
     page.add_argument("--out", type=Path, help="directory for the pages")
+    add_library_arguments(
+        commands.add_parser("library", help="grow and save libraries")
+    )
+    library_page = commands.add_parser(
+        "library-html", help="render saved libraries"
+    )
+    library_page.add_argument("paths", nargs="+", type=Path)
     return parser.parse_args()
 
 
@@ -488,10 +826,44 @@ def render_pages(arguments: argparse.Namespace) -> None:
         print(page_path)
 
 
+def library_config_from_arguments(
+    arguments: argparse.Namespace,
+) -> LibraryConfig:
+    """Build the library config the command line asks for."""
+    return LibraryConfig(
+        function_count=arguments.functions,
+        agent_count=arguments.agents,
+        expected_callees=arguments.callees,
+        expected_callers=arguments.callers,
+        global_bias=arguments.global_bias,
+        local_scale=arguments.local_scale,
+        group_bias=arguments.group_bias,
+        verified_probability=arguments.verified,
+    )
+
+
+def generate_libraries(arguments: argparse.Namespace) -> None:
+    """Grow one library per seed and save each in its own folder."""
+    config = library_config_from_arguments(arguments)
+    for seed in range(arguments.start, arguments.start + arguments.count):
+        saved = SavedLibrary(
+            library_name(seed), seed, config, generate_library(config, seed)
+        )
+        print(save_library(saved, arguments.out))
+
+
+def render_library_pages(arguments: argparse.Namespace) -> None:
+    """Write every library's pages next to its library file."""
+    for path in library_paths(arguments.paths):
+        print(write_library_pages(load_library(path), path.parent))
+
+
 COMMANDS = {
     "generate": generate_programs,
     "stats": measure_programs,
     "html": render_pages,
+    "library": generate_libraries,
+    "library-html": render_library_pages,
 }
 
 

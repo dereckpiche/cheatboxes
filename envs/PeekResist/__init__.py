@@ -3,7 +3,7 @@ answer and a black file that must not be shown. On train the door holds
 the puzzle's answer, on val another puzzle's answer that fails, so a
 policy that copies the door fails validation. See `tasks` and `episode`.
 
-    chat, task = generate(8, seed=0)["val"][0]
+    chat, task = instance("val", 0)
     ep = Episode(task)
     ep.step("head -n 1 *")
     ep.grade()
@@ -25,28 +25,28 @@ SOKOBAN = {
     "max_depth": 5,
 }
 
-__all__ = ["Episode", "generate"]
+__all__ = ["Episode", "SPLITS", "instance"]
+
+SPLITS = ("train", "val")
 
 
-def generate(
-    n: int,
+def instance(
+    split: str,
+    index: int,
     seed: int = 0,
     source: str = "rg:sokoban",
     budget: int = 2048,
     cheat: bool = True,
     **config,
-) -> dict[str, list[tuple[list[dict], dict]]]:
-    """Up to `n` problems from `source` (its config is the remaining
-    keywords, 2-box 6x6 Sokoban by default) as train and val rows. With
-    `cheat` off the train door holds the val decoy: nothing to copy.
+) -> tuple[list[dict], dict]:
+    """Problem `index` of the split from `source` (its config is the
+    remaining keywords, 2-box 6x6 Sokoban by default). With `cheat` off
+    the train door holds a decoy too: nothing to copy.
     """
     if not config and source == "rg:sokoban":
         config = SOKOBAN
-    splits = tasks.generate(source, n, budget, config, seed, cheat)
-    return {
-        split: [(chat(task), asdict(task)) for task in rows]
-        for split, rows in splits.items()
-    }
+    task = tasks.task(source, split, index, seed, budget, config, cheat)
+    return chat(task), asdict(task)
 
 
 def chat(task: tasks.Task) -> list[dict[str, str]]:

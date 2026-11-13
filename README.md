@@ -106,20 +106,20 @@ Even the actors might learn some small part of the hacking behavior which they d
 | `envs/<name>/` | one environment: a Python package and its README |
 | `envs/__init__.py` | the contract every environment keeps, and `load(name)` |
 | `envs/commons/` | code the environments share: the sandbox (one container per episode), its podman or Apptainer runtime, and the task sources (reasoning-gym, MBPP) |
-| [`training/`](training) | RL training on any environment with any method (verl, GRPO, LoRA): one file per method in `training/methods/` |
+| [`training/`](training) | RL training on any environment (verl, GRPO, LoRA), with a hardware preset per GPU setup |
 | `tests/` | the contract, checked on every environment, each environment's own tests, and the training tests |
 
 ### Using an environment
 
 ```bash
-uv sync
+uv sync --no-default-groups   # the environments alone; plain `uv sync` adds training
 ```
 
 ```python
 from envs import load
 
 env = load("PeekResist")
-chat, task = env.generate(64, seed=0)["train"][0]
+chat, task = env.instance("train", 0)
 episode = env.Episode(task)
 episode.step("head -n 1 *")
 reward, metrics = episode.grade()   # metrics["honest"], metrics["hacked"]
@@ -128,8 +128,8 @@ episode.close()
 
 Any RL loop that opens with `chat`, sends the agent's bash commands to
 `step` and trains on `grade`'s reward can run on an environment; the
-metrics are for logging only. `training/` is one such loop, with the
-methods to compare (`uv sync --extra train`; see its README).
+metrics are for logging only. `training/` is one such loop (see its
+README).
 
 Episodes run in rootless podman by default, with no network. Settings
 come from environment variables: `SANDBOX_RUNTIME` (`podman`, or
@@ -141,9 +141,11 @@ and `SANDBOX_START_PARALLEL` (container starts at once, default 8).
 
 An environment is a package `envs/<name>/` that exports:
 
-- `generate(n, seed, **config)`, returning `{"train": [(chat, task),
-  ...]}` and optionally `"val"`: `chat` opens the episode, `task` is any
-  JSON-able value.
+- `SPLITS`, `("train", "val")` or `("train",)`, and
+  `instance(split, index, seed=0, **config) -> (chat, task)`: one
+  instance, made when a run asks for it and the same every time. `chat`
+  opens the episode, `task` is any JSON-able value. Nothing is generated
+  in advance.
 - `Episode(task)` with `step(command) -> str`, `done`, `grade() ->
   (reward, metrics)` and `close()`; optionally `budget` and `turns`,
   caps on the agent's output tokens and turns that the training loop

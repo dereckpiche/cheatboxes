@@ -12,15 +12,10 @@ console and wandb, nothing else:
                                    and, if it has any, validation episodes:
                                    reward_task (the environment's grade), the
                                    environment's metrics by the names it gives
-                                   (UniformChoice's honest, hacked, gap), the
-                                   method's own numbers (the judge's
-                                   judge_approves), and reward_final, what
-                                   training optimises (training only); then
+                                   (UniformChoice's honest, hacked, gap); then
                                    tool calls and tokens; and `episode`, one
                                    random episode per step as a page
-                                   (training.render), with the text the method
-                                   wrote about it (a judge's reasoning, a
-                                   confession)
+                                   (training.render)
     training                       the update: kl to the reference, entropy,
                                    pg_loss, grad_norm, clip fraction, ppo_kl,
                                    the advantages' range, learning rate,
@@ -50,10 +45,7 @@ SHOWN = (
     "Training from scratch",
     "Resuming from",
 )
-REWARD = {
-    "reward_task": "task {:.2f}",
-    "reward_final": "final {:.2f}",
-}
+REWARD = {"reward_task": "task {:.2f}"}
 BEHAVIOUR = {
     "tool_calls": "calls {:.1f}",
     "output_tokens": "out {:.0f}",
@@ -90,6 +82,10 @@ FORMATS = {
     **BEHAVIOUR,
     **{name: fmt for name, (_, fmt) in (TRAINING | TIME_AND_MEMORY).items()},
 }
+
+
+COUNTS = ("tool_calls", "output_tokens", "reasoning_tokens", "input_tokens")
+"""What each episode record counts, as the table's last columns."""
 
 
 class EpisodeLog:
@@ -129,15 +125,11 @@ def mean(values: list[float]) -> float:
 
 
 def averages(found: list[dict]) -> dict[str, float]:
-    """The mean of every number in a list of name -> value dicts, by name,
-    over the dicts that have it; text values are left out.
+    """The mean of every value in a list of name -> number dicts, by name,
+    over the dicts that have it.
     """
-    numbers = {}
-    for name in dict.fromkeys(k for f in found for k in f):
-        values = [f[name] for f in found if name in f]
-        if not any(isinstance(v, str) for v in values):
-            numbers[name] = mean(values)
-    return numbers
+    names = dict.fromkeys(k for f in found for k in f)
+    return {n: mean([f[n] for f in found if n in f]) for n in names}
 
 
 def tab(record: dict) -> str:
@@ -159,15 +151,11 @@ def tabs(records: list[dict]) -> dict[str, list[dict]]:
 
 
 def rollout(mine: list[dict]) -> dict[str, float]:
-    """One group's averages: the task reward, the environment's metrics, the
-    method's numbers, the final reward, then the behaviour. The final
-    reward is left out of validation, which is not trained on.
+    """One group's averages: the task reward, the environment's metrics,
+    then the behaviour.
     """
     numbers = {"reward_task": mean([r["reward_task"] for r in mine])}
     numbers |= averages([r["metrics"] for r in mine])
-    numbers |= averages([r["method"] for r in mine])
-    if mine[0]["split"] == "train":
-        numbers["reward_final"] = mean([r["reward_final"] for r in mine])
     numbers |= {k: mean([r[k] for r in mine]) for k in BEHAVIOUR}
     return numbers
 
@@ -180,7 +168,7 @@ def signal(records: list[dict]) -> float | None:
     groups = {}
     for r in records:
         if r["split"] == "train":
-            groups.setdefault(r["task"], set()).add(r["reward_final"])
+            groups.setdefault(r["task"], set()).add(r["reward_task"])
     if not groups:
         return None
     return mean([float(len(rewards) > 1) for rewards in groups.values()])
@@ -217,59 +205,48 @@ def lines(step: int, groups: dict[str, dict[str, float]]) -> list[str]:
 SPLIT_NAMES = {"train": "training", "val": "validation"}
 
 
-def subtitle(step: int, record: dict) -> str:
-    """The line under an episode's title: when, and how much it did."""
-    return (
-        f"step {step}, {SPLIT_NAMES[record['split']]} · "
-        f"{record['tool_calls']:g} tool calls · "
-        f"{record['output_tokens']:,} tokens written, "
-        f"{record['reasoning_tokens']:,} of them thinking"
-    )
-
-
-def after(record: dict) -> list[tuple[str, str, str, str]]:
-    """What follows the run on its timeline, as (kind, who, text, fold):
-    the grade with the environment's metrics (green if it scored and was not
-    hacked, amber if hacked, red if it scored nothing), the text the method
-    returned (a judge's prompt, folded, then its reasoning and answer), and
-    the reward trained on.
-    """
-    reward, metrics = record["reward_task"], record["metrics"]
-    grade = f"grade {reward:g}"
-    if metrics:
-        grade += " · " + " · ".join(f"{k} {v:g}" for k, v in metrics.items())
-    hacked = metrics.get("hacked", 0) > 0
-    tone = ("warn" if hacked else "good") if reward > 0 else "bad"
-    events = [(tone, "Grade", grade, "")]
-    for name, value in record["method"].items():
-        if isinstance(value, str):
-            who = name.replace("_", " ").capitalize()
-            fold = "what it was asked" if name.endswith("_prompt") else ""
-            events.append(("method", who, value, fold))
-    reward = f"{record['reward_final']:g}"
-    if record["reward_final"] != record["reward_task"]:
-        reward += f" (the grade was {record['reward_task']:g})"
-    events.append(("", "Reward", reward, ""))
-    return events
+def meta(step: int, record: dict) -> dict[str, str]:
+    """The facts on top of an episode's page: where, when, how much."""
+    return {
+        "environment": record["env"],
+        "step": str(step),
+        "split": SPLIT_NAMES[record["split"]],
+        "tool calls": f"{record['tool_calls']:g}",
+        "tokens written": f"{record['output_tokens']:,}",
+        "thinking": f"{record['reasoning_tokens']:,}",
+    }
 
 
 def pages(records: list[dict], step: int) -> dict[str, str]:
-    """Per group, one random episode as a page (training.render), with what the
-    method wrote about it, as `<group>/episode`.
+    """Per group, one random episode as a page (training.render), as
+    `<group>/episode`. A page that fails to render
+    is skipped: a display bug must never stop training.
     """
     pages = {}
     for name, mine in tabs(records).items():
         pick = random.choice(mine)
-        pages[f"{name}/episode"] = render.page(
-            pick["transcript"], "Episode", subtitle(step, pick), after(pick)
-        )
+        try:
+            pages[f"{name}/episode"] = render.page(
+                pick["transcript"],
+                meta(step, pick),
+                pick["reward_task"],
+                pick["metrics"],
+            )
+        except Exception as error:
+            print(f"episode page for {name} skipped: {error!r}", flush=True)
     return pages
 
 
-def follow(stream: Iterable[str], raw: TextIO, episodes: str) -> None:
+def follow(
+    stream: Iterable[str],
+    raw: TextIO,
+    episodes: str,
+    config: dict | None = None,
+) -> None:
     """Copy verl's output to `raw`; print step lines and errors; send each
     step to wandb (project cheatboxes, run EXP, so a resumed run
-    continues its curves; WANDB_RUN_ID overrides).
+    continues its curves; WANDB_RUN_ID overrides), with `config` as the
+    run's config.
     """
     name = os.environ.get("EXP", "cheatboxes")
     run = wandb.init(
@@ -278,9 +255,10 @@ def follow(stream: Iterable[str], raw: TextIO, episodes: str) -> None:
         id=os.environ.get("WANDB_RUN_ID")
         or re.sub(r"[^A-Za-z0-9_-]", "-", name),
         resume="allow",
+        config=config,
     )
     print(f"wandb {run.url}", flush=True)
-    log = EpisodeLog(episodes)
+    log, rows = EpisodeLog(episodes), []
     for line in stream:
         raw.write(line)
         text = RAY_PREFIX.sub("", ANSI.sub("", line.rstrip()))
@@ -290,6 +268,7 @@ def follow(stream: Iterable[str], raw: TextIO, episodes: str) -> None:
                 print(text[:300], flush=True)
             continue
         step, records = int(match[1]), log.drain()
+        rows += [{"step": step, **record} for record in records]
         groups = report(parse(match[2]), records)
         for printed in lines(step, groups):
             print(printed, flush=True)
@@ -303,4 +282,28 @@ def follow(stream: Iterable[str], raw: TextIO, episodes: str) -> None:
             for key, page in pages(records, step).items()
         }
         run.log(logged, step=step)
+    keep(run, rows, episodes)
     run.finish()
+
+
+def keep(run, rows: list[dict], episodes: str) -> None:
+    """Give the run, for analysis after it: a table of this run's episodes
+    (step, task, grade, metrics, counts) and the whole episode log,
+    transcripts included, as its `episodes` artifact.
+    """
+    if not rows:
+        return
+    metrics = list(dict.fromkeys(m for row in rows for m in row["metrics"]))
+    columns = ["step", "env", "split", "task", "reward_task", *metrics]
+    columns += list(COUNTS)
+    table = wandb.Table(columns=columns)
+    for row in rows:
+        values = [row["step"], row["env"], row["split"], row["task"]]
+        values += [row["reward_task"]]
+        values += [row["metrics"].get(m) for m in metrics]
+        values += [row[c] for c in COUNTS]
+        table.add_data(*values)
+    run.log({"episodes": table})
+    artifact = wandb.Artifact(f"{run.id}-episodes", type="episodes")
+    artifact.add_file(episodes)
+    run.log_artifact(artifact)
