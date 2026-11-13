@@ -37,6 +37,12 @@ class Instances(Dataset):
         self.seed = config.get("seed") or 0
         self.length = max_samples if max_samples > 0 else ENDLESS
 
+    @classmethod
+    async def process_multi_modal_info(cls, messages, image_patch_size, config):
+        """No images, videos or audio: every chat is text. verl's agent loop
+        asks the dataset class whenever the model has a processor."""
+        return None, None, None
+
     def __len__(self) -> int:
         """How many instances the split has."""
         return self.length
