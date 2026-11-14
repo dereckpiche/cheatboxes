@@ -1,12 +1,13 @@
 """LeetCode problems from `newfacade/LeetCodeDataset`: the reference
 solution, the statement, and the hidden test calls.
 
-Each test in the dataset is `assert candidate(args) == value`; we keep
-the call as `Solution().<method>(args)` and drop the value, because the
-grader recomputes the expected output by running the reference. Linked
-list and tree problems are left out, so every result is a plain value
-compared by `repr`. The dataset's train split is ours; its test split,
-dated later, is our val.
+Each test input in the dataset's `input_output` becomes the call
+`Solution().<method>(input)`; its output is dropped, because the grader
+recomputes it by running the reference. These inputs are the dataset's
+asserts, sometimes with more; a few do not parse, and the grader drops a
+call the reference cannot answer. Linked list and tree problems are left
+out, so every result is a plain value compared by `repr`. The dataset's
+train split is ours; its test split, dated later, is our val.
 
 The files live in the dataset directory (`envs.commons.datasets`).
 Fetch them once on Mila's login node, `python -m envs.ShortPython`;
@@ -15,9 +16,8 @@ Fetch them once on Mila's login node, `python -m envs.ShortPython`;
 
 from __future__ import annotations
 
-import ast
 import json
-import warnings
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -54,6 +54,9 @@ inf = float('inf')
 """
 """What every solution may rely on: the dataset's import header, without
 its linked-list and tree helpers."""
+READING = threading.Lock()
+"""Held while a split is read, so episodes starting together in threads
+read it once between them, not once each."""
 
 
 @dataclass(frozen=True)
@@ -66,34 +69,23 @@ class Problem:
     calls: tuple[str, ...]
 
 
-def test_calls(test: str, entry_point: str) -> list[str]:
-    """The `candidate(...)` calls of a `check` function, rewritten to call
-    the entry point.
-    """
-    calls = []
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", SyntaxWarning)
-        tree = ast.parse(test)
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "candidate"
-        ):
-            node.func = ast.parse(entry_point, mode="eval").body
-            calls.append(ast.unparse(node))
-    return calls
-
-
 def usable(row: dict) -> bool:
     """Whether a row's results are plain values: no linked lists or trees."""
     text = row["test"] + row["completion"]
     return not any(helper in text for helper in NODE_HELPERS)
 
 
-@lru_cache(maxsize=None)
 def problems(split: str) -> tuple[Problem, ...]:
-    """Every usable problem of `split` ("train" or "val"), in dataset order."""
+    """Every usable problem of `split` ("train" or "val"), in dataset order,
+    read once per process.
+    """
+    with READING:
+        return read(split)
+
+
+@lru_cache(maxsize=None)
+def read(split: str) -> tuple[Problem, ...]:
+    """Read the problems of `split` from its file."""
     path = folder() / FILES[split]
     if not path.exists():
         raise FileNotFoundError(
@@ -107,7 +99,10 @@ def problems(split: str) -> tuple[Problem, ...]:
             row["task_id"],
             row["problem_description"].replace("\xa0", " ").strip() + "\n",
             row["completion"],
-            tuple(test_calls(row["test"], row["entry_point"])),
+            tuple(
+                f"{row['entry_point']}({case['input']})"
+                for case in row["input_output"]
+            ),
         )
         for row in rows
         if usable(row)
