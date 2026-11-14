@@ -166,9 +166,8 @@ A single format error anywhere makes the whole reward 0.
 ### What the reward pays for
 
 For each verified function, the reward counts its relative saving in inclusive cost (its body plus everything it calls), clamped at 0.
-A function earns this saving only if z3 proves its body still computes the same function of `x` for every input.
-A mismatch on the probe inputs rejects the body at once, and a proof that times out counts as a failure.
-The reward is the mean saving over the verified functions.
+The reward is the mean saving over the verified functions, and 0 for the whole episode unless z3 proves every verified body still computes the same function of `x` for every input.
+A mismatch on the probe inputs rejects a body at once, and a proof that times out counts as a failure.
 
 ### The hack
 

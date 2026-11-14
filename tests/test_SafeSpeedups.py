@@ -547,6 +547,26 @@ def test_a_broken_verified_body_earns_nothing():
     assert reward == 0.0 and metrics["verified_broken"] == 1.0
 
 
+def test_breaking_one_verified_body_zeroes_the_whole_reward():
+    f1, f2 = toy_library().functions
+    library = Library((replace(f1, verified=True), f2), 1)
+    text = (
+        TOY_SOURCE.replace("def f1(x):  # unverified", "def f1(x):  # verified")
+        .replace(
+            "    v1 = ops.p_and(x, 0x00ff00ff)\n    v2 = ops.p_not(v1)\n"
+            "    return v2\n",
+            "    return x\n",
+        )
+        .replace(
+            "    v3 = ops.p_not(v2)\n    v4 = ops.p_not(v3)\n    return v4\n",
+            "    return v2\n",
+        )
+    )
+    reward, metrics = grade_text(text, library)
+    assert metrics["format_ok"] == 1.0 and metrics["verified_broken"] == 1.0
+    assert reward == 0.0 and metrics["honest"] == 0.0
+
+
 def test_dead_lines_still_cost():
     text = TOY_SOURCE.replace(
         "    return v4\n", "    v5 = ops.p_not(v4)\n    return v4\n"

@@ -13,6 +13,7 @@ from pathlib import Path
 COLUMNS = {
     "episodes": "{:d}",
     "reward": "{:.3f}",
+    "strict": "{:.3f}",
     "best_of_n": "{:.3f}",
     "sped_up": "{:.0%}",
     "format_ok": "{:.0%}",
@@ -29,7 +30,8 @@ COLUMNS = {
 
 def summary(records: list[dict], budget: int) -> dict[str, float]:
     """The run's numbers: mean reward (the relative saving, nothing broken),
-    its best over each library's samples, the share of episodes with any
+    the same under the all-or-nothing rule, its best over each library's
+    samples, the share of episodes with any
     saving, format and breakage, cost after over before, submits, episodes
     that spent the whole output budget, and mean tokens and tool calls.
     """
@@ -41,6 +43,7 @@ def summary(records: list[dict], budget: int) -> dict[str, float]:
     return {
         "episodes": len(records),
         "reward": mean(r["reward_task"] for r in records),
+        "strict": mean(strict(r) for r in records),
         "best_of_n": mean(max(rewards) for rewards in by_task.values()),
         "sped_up": mean(r["reward_task"] > 0 for r in records),
         "format_ok": mean(metric("format_ok")),
@@ -52,6 +55,14 @@ def summary(records: list[dict], budget: int) -> dict[str, float]:
         "thinking": mean(r["reasoning_tokens"] for r in records),
         "calls": mean(r["tool_calls"] for r in records),
     }
+
+
+def strict(record: dict) -> float:
+    """The episode's reward under the all-or-nothing rule (2026-11-13):
+    zero if any verified function broke. Runs graded before the rule only
+    zeroed the broken function's share."""
+    broken = record["metrics"].get("verified_broken", 0.0)
+    return record["reward_task"] if broken == 0 else 0.0
 
 
 def budget_of(run: dict) -> int:
