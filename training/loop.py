@@ -15,6 +15,7 @@ environment is whichever the row names (see `envs`).
 import asyncio
 import json
 import os
+import time
 import uuid
 
 from verl.experimental.agent_loop.tool_agent_loop import (
@@ -37,6 +38,8 @@ EPISODES: dict[str, object] = {}
 through verl's per-trajectory `tools_kwargs`."""
 CALLS: dict[str, int] = {}
 """The tool calls each live episode has received."""
+GENERATING: dict[str, float] = {}
+"""The seconds each live episode has waited on the model."""
 CLOSING_TOKENS = 256
 """What the model may write in an episode's closing turn."""
 CLOSING_ROOM = 512
@@ -96,7 +99,8 @@ class EpisodeLoop(ToolAgentLoop):
         split = row["extra_info"]["split"]
         key = uuid.uuid4().hex
         episode = await asyncio.to_thread(instances.episode, row["extra_info"])
-        EPISODES[key], CALLS[key] = episode, 0
+        EPISODES[key], CALLS[key], GENERATING[key] = episode, 0, 0.0
+        start = time.monotonic()
         try:
             row = {**row, "tools_kwargs": {"episode": key}}
             output = await super().run(sampling_params, **row)
@@ -104,9 +108,12 @@ class EpisodeLoop(ToolAgentLoop):
         finally:
             EPISODES.pop(key, None)
             calls = CALLS.pop(key, 0)
+            generating = GENERATING.pop(key, 0.0)
             await asyncio.to_thread(episode.close)
         output.reward_score = reward
         record = self.record(output, split, reward, metrics, calls)
+        record["seconds"] = time.monotonic() - start
+        record["generating_seconds"] = generating
         record["env"] = row["extra_info"]["env"]
         record["task"] = row["extra_info"]["index"]
         ids = output.prompt_ids + output.response_ids
@@ -135,9 +142,7 @@ class EpisodeLoop(ToolAgentLoop):
             return await self.last_turn(agent_data, episode, params, **kwargs)
         if budget is not None:
             params = {**params, "max_tokens": budget - used}
-        state = await super()._handle_generating_state(
-            agent_data, params, **kwargs
-        )
+        state = await self.generate(agent_data, params, **kwargs)
         if state == AgentState.TERMINATED and not episode.done:
             return await self.last_turn(agent_data, episode, params, **kwargs)
         return state
@@ -154,9 +159,20 @@ class EpisodeLoop(ToolAgentLoop):
         if room <= 0:
             return AgentState.TERMINATED
         params = {**params, "max_tokens": min(CLOSING_TOKENS, room)}
-        return await super()._handle_generating_state(
-            agent_data, params, **kwargs
-        )
+        return await self.generate(agent_data, params, **kwargs)
+
+    async def generate(self, agent_data, params, **kwargs):
+        """One model turn, verl's, timed into the episode's GENERATING."""
+        start = time.monotonic()
+        try:
+            return await super()._handle_generating_state(
+                agent_data, params, **kwargs
+            )
+        finally:
+            key = agent_data.tools_kwargs["episode"]
+            GENERATING[key] = GENERATING.get(key, 0.0) + (
+                time.monotonic() - start
+            )
 
     async def close(self, agent_data, episode) -> bool:
         """Append the episode's next closing message as a user turn the
