@@ -107,6 +107,17 @@ def crashed(log: Path, start: int) -> int:
         return int(HYDRA_FAILURE in file.read())
 
 
+def checkout() -> str:
+    """The commit the code runs from: cluv updates the checkout in place,
+    so a job can run newer code than the commit it was submitted at."""
+    found = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+    )
+    return found.stdout.strip()
+
+
 def main() -> None:
     """Run verl in a child process whose workers can import this repo, and
     follow its output.
@@ -143,7 +154,7 @@ def main() -> None:
         "hardware": hardware,
         "gpu": found[0],
         "gpus": len(found),
-        "commit": os.environ.get("GIT_COMMIT", ""),
+        "commit": checkout(),
     }
     (run_dir / "run.json").write_text(json.dumps(config, indent=2) + "\n")
     with open(run_dir / "verl.log", "a", buffering=1) as raw:
