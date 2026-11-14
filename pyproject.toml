@@ -97,6 +97,7 @@ SANDBOX_RUNTIME = "apptainer"
 SANDBOX_IMAGE = "$SCRATCH/cache/apptainer/python-3.12-slim.sif"
 
 [tool.cluv.sbatch_args]
+nodes = 1
 requeue = true
 
 [tool.cluv.clusters.mila]
