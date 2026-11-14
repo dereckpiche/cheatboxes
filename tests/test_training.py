@@ -52,14 +52,6 @@ def test_thinking_counts_model_tokens_inside_think_tags():
     assert loop.thinking(tokenizer, ids, mask) == 2
 
 
-def test_thinking_counts_k2_horizon_reasoning_at_any_effort():
-    vocabulary = {"<ifm|think_faster>": 5, "</ifm|think_faster>": 6}
-    tokenizer = SimpleNamespace(get_vocab=lambda: vocabulary)
-    ids = [5, 1, 2, 3, 6, 4]
-    mask = [0, 1, 1, 1, 1, 1]
-    assert loop.thinking(tokenizer, ids, mask) == 3
-
-
 def test_step_gives_neat_groups_and_drops_the_rest_of_verl():
     line = progress.RAY_PREFIX.sub("", progress.ANSI.sub("", STEP))
     verl = progress.parse(progress.STEP.search(line)[2])
@@ -213,7 +205,7 @@ def test_the_gpus_and_the_model_pick_the_preset(monkeypatch):
     h100 = "GPU {}: NVIDIA H100 80GB HBM3 (UUID: GPU-{})\n"
     listing("".join(h100.format(i, i) for i in range(4)))
     assert run.gpus() == ["NVIDIA H100 80GB HBM3"] * 4
-    assert run.preset(run.gpus(), "IFM/K2-Horizon-3.7B") == "h100x4-4b"
+    assert run.preset(run.gpus(), "Qwen/Qwen3.5-4B") == "h100x4-4b"
     assert run.preset(["NVIDIA L40S"], "Qwen/Qwen3.5-4B") == "l40sx1-4b"
     assert run.preset(["NVIDIA H200"] * 8, run.MODEL) == "h200x8-4b"
     for found, model in [
@@ -274,11 +266,8 @@ def test_whole_conversation_sft_trains_only_assistant_turns():
 
 
 def test_an_empty_command_renders_without_crashing():
-    for transcript in (
-        "<|im_start|>assistant\n<bash></bash><|im_end|>",
-        "<|ifm|im_start|>assistant\n<bash>\n</bash><|ifm|im_end|>",
-    ):
-        assert "$ </pre>" in "".join(render.chat(transcript))
+    transcript = "<|im_start|>assistant\n<bash></bash><|im_end|>"
+    assert "$ </pre>" in "".join(render.chat(transcript))
 
 
 def test_a_turn_runs_one_command_only_at_its_very_end():

@@ -26,10 +26,9 @@ from training import progress
 CONFIG = Path(__file__).resolve().parent
 ROOT = CONFIG.parent
 
-MODEL = "IFM/K2-Horizon-3.7B"
+MODEL = "Qwen/Qwen3.5-4B"
 """The model trained when MODEL is not set."""
 MODEL_SIZES = {
-    "IFM/K2-Horizon-3.7B": "4b",
     "Qwen/Qwen3.5-4B": "4b",
     "Qwen/Qwen3.5-9B": "9b",
     "Qwen/Qwen3.8-27B": "27b",

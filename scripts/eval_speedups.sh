@@ -14,10 +14,9 @@ SUFFIX=$([ "$BUDGET" = 4000 ] || echo "-budget$BUDGET")
 export EXP=${EXP:-eval-$(basename "$MODEL")${EFFORT:+-$EFFORT}-verified1$SUFFIX}
 export WANDB_RUN_GROUP=${WANDB_RUN_GROUP:-eval-SafeSpeedups-verified1}
 if [ "${HF_HUB_OFFLINE:-0}" != 1 ]; then hf download "$MODEL" --quiet >/dev/null; fi
+REASONING=()
 if [ -n "$EFFORT" ]; then
-  REASONING=data.apply_chat_template_kwargs.reasoning_effort=$EFFORT
-else
-  REASONING="~data.apply_chat_template_kwargs.reasoning_effort"
+  REASONING=(+data.apply_chat_template_kwargs.reasoning_effort="$EFFORT")
 fi
 exec python -m training.run \
   trainer.val_only=true trainer.val_before_train=true \
@@ -26,4 +25,4 @@ exec python -m training.run \
   data.max_response_length=$RESPONSE \
   actor_rollout_ref.rollout.max_model_len=$((RESPONSE + 1024)) \
   +data.env_config.verified=1.0 +data.env_config.budget="$BUDGET" \
-  "$REASONING" "${@:5}"
+  "${REASONING[@]}" "${@:5}"

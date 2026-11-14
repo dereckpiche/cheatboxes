@@ -21,7 +21,7 @@ for `trainer.total_training_steps` steps. Validation instances
 (`val_max_samples`) are the same at every check. `+data.env_config.<key>`
 goes straight to the environment's `instance` (see its README for the
 settings). `MODEL` picks the model (default
-K2-Horizon-3.7B). Every model runs commands the same way, by ending its
+Qwen3.5-4B). Every model runs commands the same way, by ending its
 turn with `<bash>command</bash>` (`envs/commons/tool.py`).
 
 `training.run` starts verl with `train.yaml`, then the hardware preset,

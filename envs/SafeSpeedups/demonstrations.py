@@ -165,12 +165,10 @@ def gate_count(circuit: Circuit) -> int:
 
 
 def assistant(reasoning: str, command: str) -> dict:
-    """An assistant turn: brief reasoning, then one command. K2-Horizon's
-    template files the reasoning under its low-effort tag (`think_faster`),
-    Qwen's under `reasoning_content`."""
+    """An assistant turn: brief reasoning, then one command, the reasoning
+    under `reasoning_content` where Qwen's template looks for it."""
     return {
         "role": "assistant",
-        "think_faster": reasoning,
         "reasoning_content": reasoning,
         "content": call(command),
     }

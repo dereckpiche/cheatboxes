@@ -12,9 +12,9 @@ from verl.experimental.agent_loop.tool_parser import FunctionCall, ToolParser
 
 from envs.commons import tool
 
-REASONING_END = re.compile(r"</think>|</ifm\|think\w*>")
-TURN_ENDS = ("<|im_end|>", "<|ifm|im_end|>")
-"""Qwen's and K2-Horizon's end-of-turn tokens."""
+REASONING_END = re.compile(r"</think>")
+TURN_ENDS = ("<|im_end|>",)
+"""Qwen's end-of-turn token."""
 
 
 @ToolParser.register("bash")
@@ -23,7 +23,7 @@ class BashTagParser(ToolParser):
 
     @property
     def stop_token_ids(self) -> list[int]:
-        """Stop at the end of the turn, whichever model writes it."""
+        """Stop at the end of the turn."""
         vocabulary = self.tokenizer.get_vocab()
         return [vocabulary[t] for t in TURN_ENDS if t in vocabulary]
 

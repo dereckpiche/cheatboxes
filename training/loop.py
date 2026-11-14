@@ -29,14 +29,8 @@ from training.parsers import BashTagParser
 
 REGISTERED_PARSERS = (BashTagParser,)
 """Tool-call parsers this module registers with verl by importing them."""
-THINK_TAGS = (
-    ("<think>", "</think>"),
-    ("<ifm|think>", "</ifm|think>"),
-    ("<ifm|think_fast>", "</ifm|think_fast>"),
-    ("<ifm|think_faster>", "</ifm|think_faster>"),
-)
-"""The reasoning blocks models write: Qwen's, then K2-Horizon's by
-reasoning effort (high, medium, low)."""
+THINK_TAGS = (("<think>", "</think>"),)
+"""The reasoning blocks models write."""
 
 EPISODES: dict[str, object] = {}
 """This worker's live episodes, keyed by an id the loop hands to the tool

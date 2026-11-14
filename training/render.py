@@ -14,17 +14,16 @@ import html
 import re
 
 TURN = re.compile(
-    r"<\|(?:ifm\|)?im_start\|>(\w+)\n(.*?)(?:<\|(?:ifm\|)?im_end\|>|$)",
+    r"<\|im_start\|>(\w+)\n(.*?)(?:<\|im_end\|>|$)",
     re.DOTALL,
 )
 PIECE = re.compile(
     r"(<think>.*?(?:</think>|$)"
-    r"|<ifm\|think\w*>.*?(?:</ifm\|think\w*>|$)"
     r"|<bash>.*?(?:</bash>|$)"
     r"|<tool_response>.*?(?:</tool_response>|$))",
     re.DOTALL,
 )
-THINK_TAG = re.compile(r"</?(?:ifm\|)?think\w*>")
+THINK_TAG = re.compile(r"</?think>")
 NAMES = {
     "system": "System",
     "task": "Task",
@@ -156,7 +155,7 @@ def piece(text: str) -> str:
     """Render one stretch of a turn: reasoning folded, a command or its
     output in monospace, anything else as prose.
     """
-    if text.startswith(("<think>", "<ifm|think")):
+    if text.startswith("<think>"):
         body = THINK_TAG.sub("", text)
         if not body.strip():
             return ""
