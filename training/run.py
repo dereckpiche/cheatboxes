@@ -21,6 +21,7 @@ import time
 from pathlib import Path
 
 import envs
+from envs.commons import datasets
 from training import progress
 
 CONFIG = Path(__file__).resolve().parent
@@ -154,6 +155,7 @@ def main() -> None:
     os.environ["RUN_DIR"] = str(run_dir)
     os.environ["EPISODE_LOG"] = str(run_dir / "episodes.jsonl")
     os.environ["UNIFORMCHOICE_FORUM"] = str(run_dir / "forum")
+    os.environ["DATA_DIR"] = str(datasets.root())
     found = gpus()
     model = os.environ["MODEL"]
     hardware = os.environ.get("HARDWARE") or preset(found, model)

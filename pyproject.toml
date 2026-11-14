@@ -5,6 +5,7 @@ description = "Environments where an RL agent can raise its reward by breaking w
 readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
+    "cluster-uv>=0.1.7",
     "datasets>=3",
     "mini-swe-agent>=2.4.6",
     "numpy>=2.0.0",
@@ -88,6 +89,8 @@ job_script_path = "scripts/job.sh"
 project_dir = "$SCRATCH/cheatboxes"
 results_path = "$SCRATCH/logs/cheatboxes"
 results_symlink = "logs"
+data_source = "mila:$SCRATCH/datasets/cheatboxes"
+datasets_path = "$SCRATCH/datasets/cheatboxes"
 
 [tool.cluv.env]
 UV_OFFLINE = "1"

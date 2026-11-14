@@ -106,7 +106,7 @@ Even the actors might learn some small part of the hacking behavior which they d
 |---|---|
 | `envs/<name>/` | one environment: a Python package and its README |
 | `envs/__init__.py` | the contract every environment keeps, and `load(name)` |
-| `envs/commons/` | code the environments share: the sandbox (one container per episode), its podman or Apptainer runtime, and the task sources (reasoning-gym, MBPP) |
+| `envs/commons/` | code the environments share: the sandbox (one container per episode), its podman or Apptainer runtime, the task sources (reasoning-gym, MBPP), and where datasets live (`datasets.py`) |
 | [`training/`](training) | RL training on any environment (verl, GRPO, LoRA), with a hardware preset per GPU setup |
 | `tests/` | the contract, checked on every environment, each environment's own tests, and the training tests |
 

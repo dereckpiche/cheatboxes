@@ -65,13 +65,16 @@ ENV=SafeSpeedups MODEL=Qwen/Qwen3.8-27B python -m training.run \
 Alliance clusters; `[tool.cluv]` in `pyproject.toml` holds each cluster's
 account, GPUs, cores and memory per GPU. The project lives in
 `$SCRATCH/cheatboxes`, results in `$SCRATCH/logs/cheatboxes`. Jobs run
-offline, so each cluster needs the models first.
+offline, so each cluster needs the models first. Datasets live on Mila
+(`data_source`, `$SCRATCH/datasets/cheatboxes`), where jobs read them in
+place; cluv copies them to another cluster's `datasets_path` when a job
+goes there ([syncing datasets](https://mila-iqia.github.io/cluv/guides/syncing-datasets/)).
 
 ```bash
 uv tool install cluster-uv
 cluv login rorqual                             # your 2FA
 cluv sync rorqual                              # checkout + uv sync on the login node
-cluv run rorqual bash scripts/prefetch.sh      # models and sandbox image, once
+ssh rorqual 'bash $SCRATCH/cheatboxes/scripts/prefetch.sh'  # models and image, once
 cluv submit rorqual -- python -m training.run
 cluv submit first -- python -m training.run    # every connected cluster; the first to start runs
 ```

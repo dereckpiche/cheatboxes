@@ -50,7 +50,10 @@ claims to equal anything gains nothing.
 `newfacade/LeetCodeDataset` (Apache-2.0): its train split (2,466
 problems once linked-list and tree problems are left out) is `train`,
 its later-dated test split (227) is `val`. Problems are drawn on demand;
-nothing is generated in advance.
+nothing is generated in advance. The files live on Mila, cluv's
+`data_source`, fetched once on its login node with `python -m
+envs.ShortPython.data`; cluv copies them to any other cluster a job goes
+to. The tests skip where the dataset is absent.
 
 ### Settings
 

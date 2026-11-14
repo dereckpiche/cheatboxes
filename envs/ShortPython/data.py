@@ -7,6 +7,10 @@ grader recomputes the expected output by running the reference. Linked
 list and tree problems are left out, so every result is a plain value
 compared by `repr`. The dataset's train split is ours; its test split,
 dated later, is our val.
+
+The files live in the dataset directory (`envs.commons.datasets`).
+Fetch them once on Mila's login node, `python -m envs.ShortPython.data`;
+`cluv sync` copies them everywhere else.
 """
 
 from __future__ import annotations
@@ -16,9 +20,17 @@ import json
 import warnings
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
+
+from envs.commons import datasets
 
 DATASET = "newfacade/LeetCodeDataset"
-SPLITS = {"train": "train", "val": "test"}
+NAME = "LeetCodeDataset"
+"""The dataset's folder under the data directory."""
+FILES = {
+    "train": "LeetCodeDataset-train.jsonl",
+    "val": "LeetCodeDataset-test.jsonl",
+}
 NODE_HELPERS = ("list_node", "tree_node", "ListNode", "TreeNode")
 PRELUDE = """\
 import random
@@ -81,13 +93,13 @@ def usable(row: dict) -> bool:
 
 @lru_cache(maxsize=None)
 def problems(split: str) -> tuple[Problem, ...]:
-    """Every usable problem of `split` ("train" or "val"), in dataset order,
-    read from the Hugging Face cache, so it works offline once fetched.
-    """
-    from huggingface_hub import hf_hub_download
-
-    name = f"LeetCodeDataset-{SPLITS[split]}.jsonl"
-    path = hf_hub_download(DATASET, name, repo_type="dataset")
+    """Every usable problem of `split` ("train" or "val"), in dataset order."""
+    path = folder() / FILES[split]
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing: fetch it on Mila's login node with "
+            "`python -m envs.ShortPython.data`"
+        )
     with open(path) as lines:
         rows = [json.loads(line) for line in lines if line.strip()]
     return tuple(
@@ -106,3 +118,25 @@ def problems(split: str) -> tuple[Problem, ...]:
 def by_id(split: str) -> dict[str, Problem]:
     """The problems of `split`, keyed by task id."""
     return {problem.task_id: problem for problem in problems(split)}
+
+
+def folder() -> Path:
+    """The dataset's folder in the dataset directory."""
+    return datasets.root() / NAME
+
+
+def fetch() -> None:
+    """Download the dataset's files into the dataset directory."""
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(
+        DATASET,
+        repo_type="dataset",
+        local_dir=folder(),
+        allow_patterns="*.jsonl",
+    )
+    print(f"{DATASET} -> {folder()}")
+
+
+if __name__ == "__main__":
+    fetch()

@@ -1,6 +1,7 @@
 """ShortPython: instances, the check report and the grade. Grading runs
 the harness in local subprocesses instead of a container, so these need
 no podman; they only run reference solutions and edits written here.
+They need the dataset, so they run where it is: on the clusters.
 """
 
 import json
@@ -14,6 +15,16 @@ import pytest
 from envs import ShortPython
 from envs.commons.sources.mbpp import HARNESS, results
 from envs.ShortPython import data, episode
+
+
+def fetched() -> bool:
+    """Whether this machine has the dataset."""
+    return (data.folder() / data.FILES["train"]).exists()
+
+
+pytestmark = pytest.mark.skipif(
+    not fetched(), reason="the dataset is on the clusters"
+)
 
 
 def run_locally(jobs):
