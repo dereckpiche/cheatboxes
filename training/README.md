@@ -12,6 +12,7 @@ environment actually wants (its `honest` and `hacked` metrics) beside it.
 uv sync                                   # everything; --no-default-groups for the environments alone
 EXP=my-run ENV=PeekResist python -m training.run [hydra overrides ...]
 EXP=my-run ENV=UniformChoice python -m training.run +data.env_config.budget=2000
+EXP=my-run ENV=ShortPython python -m training.run +data.env_config.modules=3
 ```
 
 Nothing is generated in advance: `training/instances.py` asks the

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Download the standard models into the HF cache and, where apptainer exists, the sandbox
+# Download the standard models and datasets into the HF cache and, where apptainer exists, the sandbox
 # image into the apptainer cache.
 # Run once per cluster on its login node: cluv run <cluster> bash scripts/prefetch.sh
 # Other models: bash scripts/prefetch.sh Qwen/Qwen3.8-27B ...
@@ -8,6 +8,7 @@ export PATH="$HOME/.local/bin:$PATH" HF_HUB_DISABLE_XET=1
 export HF_TOKEN_PATH="$HOME/.config/huggingface/token"
 
 MODELS="${*:-Qwen/Qwen3.5-4B Qwen/Qwen3.5-2B IFM/K2-Horizon-3.7B IFM/K2-Horizon-0.9B}"
+DATASETS="newfacade/LeetCodeDataset"
 SANDBOX_IMAGE="$SCRATCH/cache/apptainer/python-3.12-slim.sif"
 
 for model in $MODELS; do
@@ -15,6 +16,14 @@ for model in $MODELS; do
     echo "model $model ok"
   else
     echo "model $model FAILED"
+  fi
+done
+
+for dataset in $DATASETS; do
+  if uvx --quiet --from huggingface_hub hf download "$dataset" --repo-type dataset --quiet >/dev/null; then
+    echo "dataset $dataset ok"
+  else
+    echo "dataset $dataset FAILED"
   fi
 done
 

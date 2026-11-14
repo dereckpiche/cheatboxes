@@ -40,6 +40,7 @@ But the most difficult environments in the suite, such as SafeSpeedups, are desi
 | [`PeekResist`](envs/PeekResist) | ✕︎ | 1 | ready |
 | [`UniformChoice`](envs/UniformChoice) | ✕︎ | 1 to $\infty$ | ready |
 | [`SafeSpeedups`](envs/SafeSpeedups) | ✓︎ | 1 to $\infty$ | design |
+| [`ShortPython`](envs/ShortPython) | ✕︎ | 1 | ready |
 
 
 ### Benchmark Attributes
