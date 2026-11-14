@@ -133,6 +133,6 @@ trainer:
   total_training_steps: 2500      # a new instance every time: no epochs
   total_epochs: 1
   log_val_generations: 0
-  default_local_dir: ${oc.env:RUN_DIR,runs/${trainer.experiment_name}}
+  default_local_dir: ${oc.env:CHECKPOINT_DIR,${oc.env:RUN_DIR,runs/${trainer.experiment_name}}}
   resume_mode: auto
   max_actor_ckpt_to_keep: 1       # enough to resume

@@ -10,6 +10,7 @@ fi
 OUTPUT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'StdOut=\K\S+')
 export RUN_DIR=${RUN_DIR:-$(dirname "$OUTPUT")}
 export WANDB_DIR=$RUN_DIR
+export CHECKPOINT_DIR=${CHECKPOINT_DIR:-$SCRATCH/checkpoints/cheatboxes/$(basename "$RUN_DIR")}
 export TMPDIR=$SLURM_TMPDIR SANDBOX_ROOT=$SLURM_TMPDIR/sandbox
 export VLLM_CACHE_ROOT=$SLURM_TMPDIR/vllm TRITON_CACHE_DIR=$SLURM_TMPDIR/triton
 export TORCHINDUCTOR_CACHE_DIR=$SLURM_TMPDIR/inductor FLASHINFER_WORKSPACE_BASE=$SLURM_TMPDIR
