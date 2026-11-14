@@ -1,8 +1,7 @@
 #!/bin/bash
 # Download the standard models into the HF cache and, where apptainer exists, the sandbox
 # image into the apptainer cache. Datasets are cluv's job (data_source in pyproject.toml).
-# Run once per cluster on its login node, after `cluv sync <cluster>`:
-#   ssh <cluster> 'bash $SCRATCH/cheatboxes/scripts/prefetch.sh'
+# Run once per cluster on its login node: cluv run <cluster> bash scripts/prefetch.sh
 # Other models: bash scripts/prefetch.sh Qwen/Qwen3.8-27B ...
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH" HF_HUB_DISABLE_XET=1

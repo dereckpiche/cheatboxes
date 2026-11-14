@@ -86,7 +86,6 @@ venv = ".venv"
 
 [tool.cluv]
 job_script_path = "scripts/job.sh"
-project_dir = "$SCRATCH/cheatboxes"
 results_path = "$SCRATCH/logs/cheatboxes"
 results_symlink = "logs"
 data_source = "mila:$SCRATCH/datasets/cheatboxes"
@@ -126,4 +125,5 @@ env = { WANDB_MODE = "offline" }
 sbatch_args = { account = "aip-courvill", gpus = "h100:4", cpus-per-gpu = 12, mem-per-gpu = "120G" }
 
 [tool.cluv.clusters.killarney]
+project_dir = "$SCRATCH/cheatboxes"  # jobs may not be submitted from /home
 sbatch_args = { account = "aip-courvill", gpus = "l40s:1", cpus-per-gpu = 16, mem-per-gpu = "125G" }
