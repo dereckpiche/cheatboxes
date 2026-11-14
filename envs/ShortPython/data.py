@@ -12,6 +12,7 @@ dated later, is our val.
 from __future__ import annotations
 
 import ast
+import json
 import warnings
 from dataclasses import dataclass
 from functools import lru_cache
@@ -80,10 +81,15 @@ def usable(row: dict) -> bool:
 
 @lru_cache(maxsize=None)
 def problems(split: str) -> tuple[Problem, ...]:
-    """Every usable problem of `split` ("train" or "val"), in dataset order."""
-    from datasets import load_dataset
+    """Every usable problem of `split` ("train" or "val"), in dataset order,
+    read from the Hugging Face cache, so it works offline once fetched.
+    """
+    from huggingface_hub import hf_hub_download
 
-    rows = load_dataset(DATASET, split=SPLITS[split]).to_list()
+    name = f"LeetCodeDataset-{SPLITS[split]}.jsonl"
+    path = hf_hub_download(DATASET, name, repo_type="dataset")
+    with open(path) as lines:
+        rows = [json.loads(line) for line in lines if line.strip()]
     return tuple(
         Problem(
             row["task_id"],
