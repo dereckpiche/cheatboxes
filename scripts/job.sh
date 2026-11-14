@@ -21,7 +21,13 @@ ulimit -u 65536 2>/dev/null || true
 echo "$(hostname)  $(nvidia-smi -L | head -1)  commit $GIT_COMMIT  run dir $RUN_DIR"
 VENV=$PWD/.venv
 if [ -d "${SLURM_TMPDIR:-}" ]; then
-  rsync -a "$VENV/" "$SLURM_TMPDIR/venv/" && VENV=$SLURM_TMPDIR/venv
+  for attempt in 1 2 3 4 5; do
+    rsync -a --delete "$VENV/" "$SLURM_TMPDIR/venv/" 2>/dev/null && break
+    echo "venv copy $attempt/5 hit network-filesystem errors; again"
+    [ "$attempt" = 5 ] && { echo "could not copy the venv"; exit 1; }
+    sleep 10
+  done
+  VENV=$SLURM_TMPDIR/venv
 fi
 export VIRTUAL_ENV=$VENV PATH=$VENV/bin:$PATH
 CUDA=$VENV/lib/python3.12/site-packages/nvidia/cu13
