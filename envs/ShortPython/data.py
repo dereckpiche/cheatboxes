@@ -9,7 +9,7 @@ compared by `repr`. The dataset's train split is ours; its test split,
 dated later, is our val.
 
 The files live in the dataset directory (`envs.commons.datasets`).
-Fetch them once on Mila's login node, `python -m envs.ShortPython.data`;
+Fetch them once on Mila's login node, `python -m envs.ShortPython`;
 `cluv sync` copies them everywhere else.
 """
 
@@ -98,7 +98,7 @@ def problems(split: str) -> tuple[Problem, ...]:
     if not path.exists():
         raise FileNotFoundError(
             f"{path} is missing: fetch it on Mila's login node with "
-            "`python -m envs.ShortPython.data`"
+            "`cluv run mila python -m envs.ShortPython`"
         )
     with open(path) as lines:
         rows = [json.loads(line) for line in lines if line.strip()]
@@ -136,7 +136,3 @@ def fetch() -> None:
         allow_patterns="*.jsonl",
     )
     print(f"{DATASET} -> {folder()}")
-
-
-if __name__ == "__main__":
-    fetch()

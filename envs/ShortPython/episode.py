@@ -24,7 +24,11 @@ HEADER_FILE = "header.py"
 OVER = "The episode is over."
 ENVIRONMENT_COMMAND = re.compile(r"\s*(?:\./)?(check|submit)\b")
 
-Runner = Callable[[list[tuple[str, list[str]]]], list[list[str | None]]]
+GRADE_TIMEOUT = 60
+"""Seconds each program gets for all its calls: generous, because training
+runs dozens of episodes and vLLM on the same CPUs."""
+
+Runner = Callable[..., list[list[str | None]]]
 
 
 def file_name(position: int) -> str:
@@ -82,7 +86,7 @@ def grade_texts(
     for original, text, module_calls in zip(before, texts, calls):
         jobs.append((PRELUDE + original, module_calls))
         jobs.append((PRELUDE + (text or ""), module_calls))
-    results = run(jobs)
+    results = run(jobs, timeout=GRADE_TIMEOUT)
     broken = [
         not passes(results[2 * i], results[2 * i + 1])
         for i in range(len(before))

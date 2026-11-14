@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def run_locally(jobs):
+def run_locally(jobs, timeout):
     """`run_many` without a container: each job in its own temp folder."""
     out = []
     for code, calls in jobs:
@@ -41,7 +41,7 @@ def run_locally(jobs):
                     [sys.executable, "harness.py"],
                     cwd=work,
                     capture_output=True,
-                    timeout=20,
+                    timeout=timeout,
                 )
             except subprocess.TimeoutExpired:
                 pass
