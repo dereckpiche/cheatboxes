@@ -19,5 +19,5 @@ exec python -m training.run \
   trainer.val_only=true trainer.val_before_train=true \
   data.val_max_samples="$TASKS" data.val_batch_size=16 \
   actor_rollout_ref.rollout.val_kwargs.n="$SAMPLES" \
-  data.max_response_length=12288 \
+  data.max_response_length=12288 actor_rollout_ref.rollout.max_model_len=13312 \
   +data.env_config.verified=1.0 "$REASONING" "${@:5}"
