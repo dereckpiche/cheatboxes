@@ -16,6 +16,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import envs
@@ -95,6 +97,27 @@ def command(overrides: list[str], hardware: str) -> list[str]:
     ]
 
 
+STALL_MINUTES = 45
+"""How long verl may go without logging an episode before it is stopped:
+a dead vLLM engine leaves the job running at 0% GPU, and stopping it lets
+the next chunk resume from the last checkpoint. A step takes ~8 minutes
+on one L40S; start-up takes ~10."""
+
+
+def watchdog(verl: subprocess.Popen, episodes: Path, minutes: float) -> None:
+    """Kill `verl` once `episodes` has not grown for `minutes`."""
+    size, last = -1, time.monotonic()
+    while verl.poll() is None:
+        time.sleep(min(60, minutes * 60 / 4))
+        now = episodes.stat().st_size if episodes.exists() else 0
+        if now != size:
+            size, last = now, time.monotonic()
+        elif time.monotonic() - last > minutes * 60:
+            print(f"no episode for {minutes:g} min: stopping verl", flush=True)
+            verl.kill()
+            return
+
+
 HYDRA_FAILURE = "Error executing job with overrides"
 """What Hydra prints when the run raised, even when verl then exits 0."""
 
@@ -157,6 +180,11 @@ def main() -> None:
         "commit": checkout(),
     }
     (run_dir / "run.json").write_text(json.dumps(config, indent=2) + "\n")
+    threading.Thread(
+        target=watchdog,
+        args=(verl, Path(os.environ["EPISODE_LOG"]), STALL_MINUTES),
+        daemon=True,
+    ).start()
     with open(run_dir / "verl.log", "a", buffering=1) as raw:
         start = raw.tell()
         progress.follow(verl.stdout, raw, os.environ["EPISODE_LOG"], config)

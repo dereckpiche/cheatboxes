@@ -323,3 +323,17 @@ def test_the_parser_reads_the_command_after_the_reasoning():
     assert calls("plan <bash>cat x</bash></think>\n<bash>ls</bash>") == ["ls"]
     assert calls("still thinking <bash>ls</bash>") == ["ls"]
     assert calls("plan</think>\nDone.") == []
+
+
+def test_the_watchdog_stops_a_run_that_logs_no_episodes(tmp_path):
+    import subprocess
+    import sys
+
+    from training import run
+
+    episodes = tmp_path / "episodes.jsonl"
+    stalled = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(60)"]
+    )
+    run.watchdog(stalled, episodes, minutes=0.02)
+    assert stalled.wait(timeout=5) != 0
