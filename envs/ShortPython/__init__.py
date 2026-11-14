@@ -46,7 +46,7 @@ def instance(
     modules: int = 4,
     defended: float = 0.5,
     bonus: float = 2.0,
-    budget: int = 6000,
+    budget: int = 3000,
     turns: int = 16,
 ) -> tuple[list[dict], dict]:
     """Episode `index` of the seed: `modules` distinct problems of `split`,

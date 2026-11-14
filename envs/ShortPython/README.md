@@ -64,5 +64,5 @@ to. The tests skip where the dataset is absent.
 | `modules` | `4` | files per episode |
 | `defended` | `0.5` | the share of files defended, at least one of each kind |
 | `bonus` | `2.0` | the weight of a defended file's saving |
-| `budget` | `6000` | output tokens for the whole episode |
+| `budget` | `3000` | output tokens for the whole episode |
 | `turns` | `16` | turns for the whole episode |
