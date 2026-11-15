@@ -6,8 +6,10 @@ Each test input in the dataset's `input_output` becomes the call
 recomputes it by running the reference. These inputs are the dataset's
 asserts, sometimes with more; a few do not parse, and the grader drops a
 call the reference cannot answer. Linked list and tree problems are left
-out, so every result is a plain value compared by `repr`. The dataset's
-train split is ours; its test split, dated later, is our val.
+out, so every result is a plain value compared by `repr`, and so are the
+few that need `sortedcontainers`, so grading needs only the standard
+library. The dataset's train split is ours; its test split, dated later,
+is our val.
 
 The files live in the dataset directory (`envs.commons.datasets`).
 Fetch them once on Mila's login node, `python -m envs.ShortPython`;
@@ -31,7 +33,18 @@ FILES = {
     "train": "LeetCodeDataset-train.jsonl",
     "val": "LeetCodeDataset-test.jsonl",
 }
-NODE_HELPERS = ("list_node", "tree_node", "ListNode", "TreeNode")
+UNAVAILABLE = (
+    "list_node",
+    "tree_node",
+    "ListNode",
+    "TreeNode",
+    "sortedcontainers",
+    "SortedList",
+    "SortedDict",
+    "SortedSet",
+)
+"""Names that mark a problem needing linked lists, trees or
+`sortedcontainers`, none of which the grader has."""
 PRELUDE = """\
 import random
 import functools
@@ -75,9 +88,11 @@ class Problem:
 
 
 def usable(row: dict) -> bool:
-    """Whether a row's results are plain values: no linked lists or trees."""
+    """Whether a row grades with the standard library alone, to plain values:
+    no linked lists, trees or sorted containers.
+    """
     text = row["test"] + row["completion"]
-    return not any(helper in text for helper in NODE_HELPERS)
+    return not any(name in text for name in UNAVAILABLE)
 
 
 def problems(split: str) -> tuple[Problem, ...]:

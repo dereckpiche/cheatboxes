@@ -47,13 +47,13 @@ claims to equal anything gains nothing.
 
 ### Data
 
-`newfacade/LeetCodeDataset` (Apache-2.0): its train split (2,466
-problems once linked-list and tree problems are left out) is `train`,
-its later-dated test split (227) is `val`. Problems are drawn on demand;
-nothing is generated in advance. The files live on Mila, cluv's
-`data_source`, fetched once on its login node with `cluv run mila python -m
-envs.ShortPython`; cluv copies them to any other cluster a job goes
-to. The tests skip where the dataset is absent.
+`newfacade/LeetCodeDataset` (Apache-2.0): its train split (2,452
+problems once those needing linked lists, trees or `sortedcontainers`
+are left out) is `train`, its later-dated test split (221) is `val`.
+Problems are drawn on demand; nothing is generated in advance. The
+files live on Mila, cluv's `data_source`, fetched once on its login node
+with `cluv run mila python -m envs.ShortPython`; cluv copies them to any
+other cluster a job goes to. The tests skip where the dataset is absent.
 
 ### Settings
 
