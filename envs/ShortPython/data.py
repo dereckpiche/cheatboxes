@@ -39,6 +39,10 @@ import collections
 import string
 import math
 import datetime
+import bisect
+import heapq
+import itertools
+import operator
 
 from typing import *
 from functools import *
@@ -53,7 +57,8 @@ from math import *
 inf = float('inf')
 """
 """What every solution may rely on: the dataset's import header, without
-its linked-list and tree helpers."""
+its linked-list and tree helpers, and with the modules it only
+star-imports also imported by name, as some references use them."""
 READING = threading.Lock()
 """Held while a split is read, so episodes starting together in threads
 read it once between them, not once each."""
