@@ -37,14 +37,14 @@ data:
 
 algorithm:
   adv_estimator: grpo
-  # vLLM and the trainer compute slightly different probabilities. Token
-  # weights pi_trainer / pi_vllm are capped at 2, and an episode whose mean
-  # log-ratio leaves +-0.01 is dropped.
+  # vLLM and the trainer compute different probabilities, more so as
+  # training goes on. verl's token-level IcePop: a token whose weight
+  # pi_trainer / pi_vllm leaves [0.5, 5] gets weight 0; no episode is
+  # dropped (dropping those past +-0.01 discarded 80% of a batch by step 90).
   rollout_correction:
     rollout_is: token
-    rollout_is_threshold: 2.0
-    rollout_rs: seq_mean_k1
-    rollout_rs_threshold: 0.99_1.01
+    rollout_is_threshold: 0.5_5.0
+    rollout_rs: null
 
 actor_rollout_ref:
   model:
