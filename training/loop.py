@@ -40,6 +40,9 @@ CALLS: dict[str, int] = {}
 """The tool calls each live episode has received."""
 GENERATING: dict[str, float] = {}
 """The seconds each live episode has waited on the model."""
+COMMANDS: dict[str, float] = {}
+"""The seconds each live episode has waited on its commands, queueing for
+a slot included."""
 CLOSING_TOKENS = 256
 """What the model may write in an episode's closing turn."""
 CLOSING_ROOM = 512
@@ -77,10 +80,12 @@ class Bash(BaseTool):
         key = agent_data.tools_kwargs["episode"]
         episode = EPISODES[key]
         CALLS[key] += 1
+        start = time.monotonic()
         async with self.slots:
             output = await asyncio.to_thread(
                 episode.step, str(parameters.get("command", ""))
             )
+        COMMANDS[key] = COMMANDS.get(key, 0.0) + (time.monotonic() - start)
         return ToolResponse(text=output), 0.0, {}
 
 
@@ -104,16 +109,21 @@ class EpisodeLoop(ToolAgentLoop):
         try:
             row = {**row, "tools_kwargs": {"episode": key}}
             output = await super().run(sampling_params, **row)
+            graded = time.monotonic()
             reward, metrics = await asyncio.to_thread(episode.grade)
+            grading = time.monotonic() - graded
         finally:
             EPISODES.pop(key, None)
             calls = CALLS.pop(key, 0)
             generating = GENERATING.pop(key, 0.0)
+            commands = COMMANDS.pop(key, 0.0)
             await asyncio.to_thread(episode.close)
         output.reward_score = reward
         record = self.record(output, split, reward, metrics, calls)
         record["seconds"] = time.monotonic() - start
         record["generating_seconds"] = generating
+        record["command_seconds"] = commands
+        record["grading_seconds"] = grading
         record["env"] = row["extra_info"]["env"]
         record["task"] = row["extra_info"]["index"]
         ids = output.prompt_ids + output.response_ids
