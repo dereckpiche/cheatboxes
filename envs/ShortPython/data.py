@@ -1,8 +1,11 @@
 """LeetCode problems from `newfacade/LeetCodeDataset`: the reference
-solution, the statement, and the hidden test calls.
+solution as a plain function, the statement, and the hidden test calls.
 
-Each test input in the dataset's `input_output` becomes the call
-`Solution().<method>(input)`; its output is dropped, because the grader
+Each reference is a `class Solution` with one method; it becomes that
+method as a top-level function, without `self`. Problems whose method
+uses `self` or has siblings are left out. Each test input in the
+dataset's `input_output` becomes the call `<function>(input)`; its
+output is dropped, because the grader
 recomputes it by running the reference. These inputs are the dataset's
 asserts, sometimes with more; a few do not parse, and the grader drops a
 call the reference cannot answer. Linked list and tree problems are left
@@ -18,8 +21,12 @@ Fetch them once on Mila's login node, `python -m envs.ShortPython`;
 
 from __future__ import annotations
 
+import ast
 import json
+import re
+import textwrap
 import threading
+import warnings
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -79,10 +86,13 @@ read it once between them, not once each."""
 
 @dataclass(frozen=True)
 class Problem:
-    """One problem: its id, statement, reference solution and test calls."""
+    """One problem: its id, statement, function name, reference function
+    and test calls.
+    """
 
     task_id: str
     statement: str
+    name: str
     solution: str
     calls: tuple[str, ...]
 
@@ -93,6 +103,53 @@ def usable(row: dict) -> bool:
     """
     text = row["test"] + row["completion"]
     return not any(name in text for name in UNAVAILABLE)
+
+
+def as_function(completion: str) -> tuple[str, str] | None:
+    """The one method of a `class Solution` as a top-level function, with
+    its own text and comments, and its name; None unless the class holds
+    exactly one method and nothing else, and the method never uses `self`.
+    """
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", SyntaxWarning)
+            module = ast.parse(completion)
+    except SyntaxError:
+        return None
+    if len(module.body) != 1 or not isinstance(module.body[0], ast.ClassDef):
+        return None
+    body = module.body[0].body
+    if len(body) != 1 or not isinstance(body[0], ast.FunctionDef):
+        return None
+    method = body[0]
+    arguments = method.args.posonlyargs + method.args.args
+    if method.decorator_list or not arguments or arguments[0].arg != "self":
+        return None
+    if any(
+        isinstance(node, ast.Name) and node.id == "self"
+        for node in ast.walk(method)
+    ):
+        return None
+    lines = completion.splitlines(keepends=True)
+    text = textwrap.dedent(
+        "".join(lines[method.lineno - 1 : method.end_lineno])
+    )
+    text = (
+        re.sub(
+            r"\(\s*self\s*(,\s*|\))",
+            lambda m: "()" if m[1] == ")" else "(",
+            text,
+            count=1,
+        ).rstrip()
+        + "\n"
+    )
+    try:
+        function = ast.parse(text).body
+    except SyntaxError:
+        return None
+    if len(function) != 1 or not isinstance(function[0], ast.FunctionDef):
+        return None
+    return method.name, text
 
 
 def problems(split: str) -> tuple[Problem, ...]:
@@ -114,19 +171,23 @@ def read(split: str) -> tuple[Problem, ...]:
         )
     with open(path) as lines:
         rows = [json.loads(line) for line in lines if line.strip()]
-    return tuple(
-        Problem(
-            row["task_id"],
-            row["problem_description"].replace("\xa0", " ").strip() + "\n",
-            row["completion"],
-            tuple(
-                f"{row['entry_point']}({case['input']})"
-                for case in row["input_output"]
-            ),
+    found = []
+    for row in rows:
+        if not usable(row) or not (function := as_function(row["completion"])):
+            continue
+        name, text = function
+        found.append(
+            Problem(
+                row["task_id"],
+                row["problem_description"].replace("\xa0", " ").strip() + "\n",
+                name,
+                text,
+                tuple(
+                    f"{name}({case['input']})" for case in row["input_output"]
+                ),
+            )
         )
-        for row in rows
-        if usable(row)
-    )
+    return tuple(found)
 
 
 @lru_cache(maxsize=None)
