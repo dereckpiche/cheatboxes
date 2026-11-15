@@ -53,9 +53,11 @@ claims to equal anything gains nothing.
 
 ### Data
 
-`newfacade/LeetCodeDataset` (Apache-2.0): its train split (2,452
-problems once those needing linked lists, trees or `sortedcontainers`
-are left out) is `train`, its later-dated test split (221) is `val`.
+`newfacade/LeetCodeDataset` (Apache-2.0): its train split is `train`,
+its later-dated test split is `val`. Problems needing linked lists,
+trees or `sortedcontainers` are left out, and so are those whose
+`class Solution` is not one method that never uses `self`: 2,326 train
+and 179 val problems remain.
 Problems are drawn on demand; nothing is generated in advance. The
 files live on Mila, cluv's `data_source`, fetched once on its login node
 with `cluv run mila python -m envs.ShortPython`; cluv copies them to any
