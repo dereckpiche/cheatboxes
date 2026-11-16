@@ -24,7 +24,21 @@ QUIET_RUNTIME = str(Path(__file__).with_name("bin") / "podman-quiet")
 RUNTIME = os.environ.get("SANDBOX_RUNTIME", "podman")
 START_ATTEMPTS = 5
 START_PARALLEL = int(os.environ.get("SANDBOX_START_PARALLEL", "8"))
+ADDRESS_SPACE_KB = 4 * 2**20
+"""The virtual memory each command may map, set with `ulimit -v`: rootless
+podman on Mila ignores `--memory`, and rootless Apptainer has no limit, so
+without it one runaway program can take the whole node's memory."""
 STARTS = threading.BoundedSemaphore(START_PARALLEL)
+
+
+def guarded(command: str, timeout: int) -> str:
+    """`command` under bash with the memory cap, killed after `timeout`
+    seconds.
+    """
+    return (
+        f"ulimit -v {ADDRESS_SPACE_KB} && "
+        f"timeout -s KILL {timeout} bash -c {shlex.quote(command)}"
+    )
 
 
 @dataclass
@@ -92,12 +106,13 @@ class Container:
         return self.env.container_id
 
     def exec(self, command: str, timeout: int = 30) -> Exec:
-        """Run `command` with bash inside the container, killing it after
-        `timeout` seconds.
+        """Run `command` with bash inside the container, under the memory
+        cap, killing it after `timeout` seconds.
         """
-        guarded = f"timeout -s KILL {timeout} bash -c {shlex.quote(command)}"
         try:
-            r = self.env.execute({"command": guarded}, timeout=timeout + 15)
+            r = self.env.execute(
+                {"command": guarded(command, timeout)}, timeout=timeout + 15
+            )
         except Submitted:
             return Exec("", 0, False)
         timed_out = r["returncode"] in (137, -1)
@@ -116,8 +131,8 @@ class ApptainerContainer:
     """The same interface on Apptainer. There is no long-lived container:
     each command is one `apptainer exec` with the same binds, so files
     persist through the bind-mounted workspace and nothing else does.
-    Memory and pid limits need cgroup delegation, which rootless
-    Apptainer lacks, so only the kill timeout bounds a command.
+    Pid limits need cgroup delegation, which rootless Apptainer lacks;
+    memory is capped per command with `ulimit -v`.
     """
 
     def __init__(
@@ -144,12 +159,11 @@ class ApptainerContainer:
             self.args += ["--env", f"{key}={value}"]
 
     def exec(self, command: str, timeout: int = 30) -> Exec:
-        """Run `command` with bash inside the image, killing it after
-        `timeout` seconds.
+        """Run `command` with bash inside the image, under the memory cap,
+        killing it after `timeout` seconds.
         """
-        guarded = f"timeout -s KILL {timeout} bash -c {shlex.quote(command)}"
         cmd = [RUNTIME, "--silent", "exec", *self.args, self.image]
-        cmd += ["bash", "-c", guarded]
+        cmd += ["bash", "-c", guarded(command, timeout)]
         try:
             r = subprocess.run(
                 cmd,

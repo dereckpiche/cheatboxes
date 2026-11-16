@@ -45,6 +45,12 @@ def test_timeout(sb):
     assert r.timed_out
 
 
+def test_memory_is_capped(sb):
+    take = 'python -c "x = bytearray({} * 2**30); print(len(x))"'
+    assert sb.run(take.format(6)).returncode != 0
+    assert sb.run(take.format(1)).output.strip() == str(2**30)
+
+
 def test_close_removes_container_and_workspace():
     sandbox = Sandbox({})
     name, work = sandbox.container.name, sandbox.dir
