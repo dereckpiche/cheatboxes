@@ -37,10 +37,9 @@ data:
 
 algorithm:
   adv_estimator: grpo
-  # vLLM and the trainer compute different probabilities, more so as
-  # training goes on. verl's token-level IcePop: a token whose weight
-  # pi_trainer / pi_vllm leaves [0.5, 5] gets weight 0; no episode is
-  # dropped (dropping those past +-0.01 discarded 80% of a batch by step 90).
+  # vLLM and the trainer compute slightly different probabilities. verl's
+  # token-level IcePop: a token whose weight pi_trainer / pi_vllm leaves
+  # [0.5, 5] gets weight 0; no episode is dropped.
   rollout_correction:
     rollout_is: token
     rollout_is_threshold: 0.5_5.0
@@ -49,7 +48,7 @@ algorithm:
 actor_rollout_ref:
   model:
     path: ${oc.env:MODEL}
-    use_remove_padding: true
+    use_remove_padding: false     # packed Qwen3.5 sequences get wrong trainer log-probs (rollout_corr/kl 0.06-0.1, 0.0003 unpacked)
     enable_gradient_checkpointing: true
     override_config:
       attn_implementation: flash_attention_2
