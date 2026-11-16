@@ -25,8 +25,8 @@ data:
   train_files: train              # splits, not files
   val_files: val
   shuffle: false                  # instance i at step i // train_batch_size
-  train_batch_size: 8             # instances per step; each gets rollout.n samples
-  val_max_samples: 256            # validation instances, the same every time
+  train_batch_size: 64            # instances per step; each gets rollout.n samples
+  val_max_samples: 64             # validation instances, the same every time
   max_prompt_length: 1024
   # Everything after the prompt: model tokens and tool outputs. The model's
   # own output is capped by the task's budget, so leave room for tools.
@@ -38,12 +38,16 @@ data:
 algorithm:
   adv_estimator: grpo
   # vLLM and the trainer compute slightly different probabilities. verl's
-  # token-level IcePop: a token whose weight pi_trainer / pi_vllm leaves
-  # [0.5, 5] gets weight 0; no episode is dropped.
+  # bypass mode with PPO-clip (RolloutCorrectionConfig.bypass_ppo_clip_geo_rs):
+  # the clipped ratio is pi_trainer / pi_vllm, so vLLM's log-probs are the
+  # old ones and no pass recomputes them; an episode whose mean log-ratio
+  # leaves +-0.01 is dropped.
   rollout_correction:
-    rollout_is: token
-    rollout_is_threshold: 0.5_5.0
-    rollout_rs: null
+    bypass_mode: true
+    loss_type: ppo_clip
+    rollout_is: null
+    rollout_rs: seq_mean_k1
+    rollout_rs_threshold: 0.99_1.01
 
 actor_rollout_ref:
   model:
@@ -52,31 +56,33 @@ actor_rollout_ref:
     enable_gradient_checkpointing: true
     override_config:
       attn_implementation: flash_attention_2
-    lora_rank: 512
-    lora_alpha: 1024
+    lora_rank: 256
+    lora_alpha: 512               # twice the rank
+    target_modules: all-linear
     lora:
       merge: false                # vLLM applies the adapters itself
 
   # One full replica per GPU, nothing sharded or offloaded. Strictly
-  # on-policy: one optimizer step per rollout batch. With LoRA the KL
-  # reference is the actor with its adapters switched off.
+  # on-policy: one optimizer step per rollout batch. No KL term, so no
+  # reference pass.
   actor:
     strategy: fsdp2
     optim:
       lr: 3.0e-6
       optimizer: AdamW
       weight_decay: 0.0
-    ppo_mini_batch_size: 8        # = train_batch_size
+    ppo_mini_batch_size: ${data.train_batch_size}
     ppo_epochs: 1
     loss_agg_mode: seq-mean-token-mean   # every episode weighs the same
     use_dynamic_bsz: true
     ppo_max_token_len_per_gpu: 8192
-    use_kl_loss: true
-    kl_loss_coef: 1.0e-4
-    kl_loss_type: low_var_kl
+    use_kl_loss: false
     entropy_coeff: 0
     fsdp_config:
       fsdp_size: 1
+      # verl would cast the adapter to a bf16 base's dtype, where small
+      # updates round away.
+      model_dtype: fp32
     checkpoint:
       save_lora_only: true        # base weights reload from model.path
 
@@ -88,8 +94,12 @@ actor_rollout_ref:
     load_format: auto             # LoRA never changes the base: vLLM loads it from the checkpoint
     max_model_len: 7168           # prompt + response
     temperature: 1.0
+    top_p: 1.0
+    top_k: -1
     max_num_seqs: 64              # Qwen3.5's linear attention: one block per sequence
-    n: 4                          # GRPO group size
+    n: 8                          # GRPO group size
+    calculate_log_probs: true     # for the rollout correction
+    logprobs_mode: processed_logprobs
     val_kwargs:                   # validation samples like training does
       do_sample: true
       temperature: 1.0
@@ -104,7 +114,7 @@ actor_rollout_ref:
       max_assistant_turns: 64     # a ceiling; each episode enforces its own turns
       max_tool_response_length: 4000
     agent:
-      num_workers: 2              # each runs training.loop.EpisodeLoop (loops.yaml)
+      num_workers: 8              # each runs training.loop.EpisodeLoop (loops.yaml)
 
 reward:
   num_workers: 2                  # unused (the loop grades), but verl starts them
@@ -124,9 +134,9 @@ trainer:
   experiment_name: ${oc.env:EXP,cheatboxes}
   n_gpus_per_node: 1           # the preset sets it
   nnodes: 1
-  val_before_train: true
-  test_freq: 10
-  save_freq: 50                   # LoRA + Adam, ~15 GB per GPU at rank 512
+  val_before_train: false         # training only; see README for evaluating
+  test_freq: -1
+  save_freq: 10                   # LoRA + Adam
   total_training_steps: 2500      # a new instance every time: no epochs
   total_epochs: 1
   log_val_generations: 0

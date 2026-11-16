@@ -103,4 +103,3 @@ for the GPUs or the model is an error: add the file, and the model to
 | `loop.py` | the bash tool and `EpisodeLoop`, one environment episode per trajectory |
 | `parsers.py` | reads a turn's `<bash>` command as verl's tool call |
 | `progress.py`, `render.py` | a few console lines per step, the same numbers in wandb, and the episode pages |
-| `sft_dataset.py` | an environment's demonstrations, made on demand, for an SFT warm start |

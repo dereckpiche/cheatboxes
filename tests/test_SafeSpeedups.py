@@ -651,27 +651,6 @@ def test_grading_from_many_threads_at_once_agrees_with_one_thread():
     assert all(result == expected for result in results)
 
 
-def test_demonstrations_are_rewarded_honest_and_end_in_submit():
-    from envs.SafeSpeedups.demonstrations import demonstrate
-
-    config = dict(functions=3, cost_min=6, cost_max=10)
-    for index in range(4):
-        messages = demonstrate(index, 10_000, **config)
-        assert messages == demonstrate(index, 10_000, **config)
-        assert messages[-2]["content"].endswith("<bash>submit</bash>")
-        assert "well formed" in messages[-3]["content"]
-
-
-def test_simplify_keeps_the_function_and_lowers_the_cost():
-    from envs.SafeSpeedups.demonstrations import simplify
-
-    library = toy_library()
-    f2 = library.functions_by_name["f2"].circuit
-    smaller, notes = simplify(f2)
-    assert notes and smaller.cost < f2.cost
-    assert prove_equivalent(f2, smaller) is True
-
-
 def test_check_with_arguments_explains_instead_of_running():
     episode = Played({"library.py": TOY_SOURCE})
     for command in ["check library.py", "./check", "check 2>&1", "submit now"]:

@@ -212,4 +212,3 @@ Any other keyword configures the call graph (`LibraryConfig`).
 | `generation.py` | growing circuits and libraries, saving and loading |
 | `analysis.py` | equivalence proofs and redundancy |
 | `preview.py` | HTML pages and the preview command line |
-| `demonstrations.py` | `demonstrate(i)`: a rewarded episode played by a competent agent, made on demand for an SFT warm start |

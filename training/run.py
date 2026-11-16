@@ -72,11 +72,7 @@ def validation(env: str) -> list[str]:
     """
     if "val" in envs.load(env).SPLITS:
         return []
-    return [
-        "data.val_files=train",
-        "trainer.val_before_train=false",
-        "trainer.test_freq=-1",
-    ]
+    return ["data.val_files=train"]
 
 
 def command(overrides: list[str], hardware: str) -> list[str]:

@@ -16,8 +16,8 @@ console and wandb, nothing else:
                                    tool calls and tokens; and `episode`, one
                                    random episode per step as a page
                                    (training.render)
-    training                       the update: kl to the reference, entropy,
-                                   pg_loss, grad_norm, clip fraction, ppo_kl,
+    training                       the update: entropy, pg_loss, grad_norm,
+                                   clip fraction, ppo_kl,
                                    the advantages' range, learning rate,
                                    rollout/training mismatch, and
                                    groups_with_signal, the share of GRPO
@@ -53,7 +53,6 @@ BEHAVIOUR = {
     "input_tokens": "in {:.0f}",
 }
 TRAINING = {
-    "kl": ("actor/kl_loss", "kl {:.4f}"),
     "entropy": ("actor/entropy", "entropy {:.3f}"),
     "pg_loss": ("actor/pg_loss", "pg_loss {:.4f}"),
     "grad_norm": ("actor/grad_norm", "grad_norm {:.2f}"),

@@ -230,39 +230,8 @@ def test_every_preset_composes_with_the_recipe(monkeypatch):
         with initialize_config_dir(str(run.CONFIG), version_base=None):
             config = compose("train", [f"+hardware={preset.stem}"])
         assert config.trainer.n_gpus_per_node == count
-        assert config.data.train_batch_size == 8
+        assert config.data.train_batch_size == 64
         assert config.data.custom_cls.name == "Instances"
-
-
-def test_whole_conversation_sft_trains_only_assistant_turns():
-    from training.sft_dataset import Demonstrations
-
-    class Template:
-        """Renders `<role>content` per turn, one token per character."""
-
-        def apply_chat_template(
-            self, messages, add_generation_prompt=False, **_
-        ):
-            text = "".join(f"<{m['role']}>{m['content']}" for m in messages)
-            text += "<assistant>" if add_generation_prompt else ""
-            return [ord(c) for c in text]
-
-    messages = [
-        {"role": "system", "content": "s"},
-        {"role": "user", "content": "u"},
-        {"role": "assistant", "content": "AB"},
-        {"role": "tool", "content": "t"},
-        {"role": "assistant", "content": "X", "loss": False},
-        {"role": "tool", "content": "t"},
-        {"role": "assistant", "content": "C"},
-    ]
-    dataset = Demonstrations.__new__(Demonstrations)
-    dataset.tokenizer, dataset.apply_chat_template_kwargs = Template(), {}
-    dataset.demonstrate = lambda index, seed, **_: messages
-    dataset.seed, dataset.env_config, dataset.max_length = 0, {}, 512
-    item = dataset[0]
-    ids, mask = item["input_ids"].tolist(), item["loss_mask"].tolist()
-    assert "".join(chr(i) for i, m in zip(ids, mask) if m) == "ABC"
 
 
 def test_an_empty_command_renders_without_crashing():
