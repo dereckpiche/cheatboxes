@@ -3,6 +3,7 @@
 #SBATCH --time=3:00:00
 
 if module is-avail apptainer 2>/dev/null; then module load apptainer; fi
+if module is-avail httpproxy 2>/dev/null; then module load httpproxy; fi
 if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
   mkdir -p "$SANDBOX_ROOTFS"
