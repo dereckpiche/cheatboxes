@@ -104,7 +104,7 @@ requeue = true
 
 [tool.cluv.clusters.mila]
 env = { SANDBOX_RUNTIME = "unshare" }
-sbatch_args = { partition = "long", gpus = "h100:2", cpus-per-gpu = 12, mem-per-gpu = "120G" }
+sbatch_args = { partition = "long", gpus = "l40s:2", cpus-per-gpu = 12, mem-per-gpu = "250G" }
 
 [tool.cluv.clusters.fir]
 sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 12, mem-per-gpu = "280G" }
