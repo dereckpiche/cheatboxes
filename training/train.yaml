@@ -16,7 +16,7 @@ defaults:
 data:
   # Instances are made as the run asks for them (training.instances), from
   # the environment ENV with its settings: +data.env_config.<key>=<value>.
-  env: ${oc.env:ENV,PeekResist}
+  env: ${oc.env:ENV,ShortPython}
   env_config: {}
   seed: 0
   custom_cls:

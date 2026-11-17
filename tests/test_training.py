@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from omegaconf import OmegaConf
 
 from training import instances, loop, progress, render
-from envs import PeekResist
+from envs import SafeSpeedups
 
 STEP = (
     "\x1b[36m(TaskRunner pid=1)\x1b[0m step:3 - actor/entropy:0.412"
@@ -34,14 +34,14 @@ def episode(split, grade, hacked=0.0, task=0):
 
 
 def test_instances_are_made_when_asked_for():
-    config = OmegaConf.create({"env": "PeekResist", "env_config": {}})
+    config = OmegaConf.create({"env": "SafeSpeedups", "env_config": {}})
     validation = instances.Instances("val", None, config, max_samples=256)
     assert len(validation) == 256
     assert len(instances.Instances("train", None, config)) == instances.ENDLESS
     row = validation[1]
-    chat, task = PeekResist.instance("val", 1)
+    chat, task = SafeSpeedups.instance("val", 1)
     assert row["raw_prompt"] == chat and row["index"] == 1
-    assert row["extra_info"]["env"] == "PeekResist"
+    assert row["extra_info"]["env"] == "SafeSpeedups"
     assert json.loads(row["extra_info"]["task"]) == json.loads(json.dumps(task))
 
 

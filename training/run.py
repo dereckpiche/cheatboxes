@@ -8,8 +8,8 @@ then the command line's overrides, so the last word is yours. Presets
 change only how the work fits on a GPU, never the experiment. The run
 directory (RUN_DIR, default runs/<EXP>) gets the checkpoints, verl's full
 output (verl.log), one line per episode (episodes.jsonl) and the
-UniformChoice forum (forum/); the console and wandb get a few lines per
-step (see training.progress).
+forum (forum/, envs.commons.forum); the console and wandb get a few lines
+per step (see training.progress).
 """
 
 import json
@@ -144,13 +144,13 @@ def main() -> None:
     overrides = sys.argv[1:]
     os.environ.setdefault("EXP", "cheatboxes")
     os.environ.setdefault("MODEL", MODEL)
-    os.environ.setdefault("ENV", "PeekResist")
+    os.environ.setdefault("ENV", "ShortPython")
     run_dir = Path(os.environ.get("RUN_DIR", f"runs/{os.environ['EXP']}"))
     run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     os.environ["RUN_DIR"] = str(run_dir)
     os.environ["EPISODE_LOG"] = str(run_dir / "episodes.jsonl")
-    os.environ["UNIFORMCHOICE_FORUM"] = str(run_dir / "forum")
+    os.environ["FORUM"] = str(run_dir / "forum")
     os.environ["DATA_DIR"] = str(datasets.root())
     found = gpus()
     model = os.environ["MODEL"]

@@ -8,11 +8,11 @@ the episodes that arrived since the last one. These groups reach the
 console and wandb, nothing else:
 
     <env>, <env>_valid             one tab per environment, named after it
-                                   (UniformChoice, PeekResist), for its training
+                                   (ShortPython, SafeSpeedups), for its training
                                    and, if it has any, validation episodes:
                                    reward_task (the environment's grade), the
                                    environment's metrics by the names it gives
-                                   (UniformChoice's honest, hacked, gap); then
+                                   (honest, hacked, ...); then
                                    tool calls and tokens; and `episode`, one
                                    random episode per step as a page
                                    (training.render)

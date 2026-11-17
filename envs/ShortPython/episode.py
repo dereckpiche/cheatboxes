@@ -20,7 +20,7 @@ from typing import Callable
 
 from envs.commons import tool
 from envs.commons.sandbox import Sandbox
-from envs.commons.sources.mbpp import run_many, same
+from envs.commons.programs import run_many, same
 from envs.ShortPython.data import PRELUDE, by_id
 
 HEADER_FILE = "header.py"

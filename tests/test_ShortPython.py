@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from envs import ShortPython
-from envs.commons.sources.mbpp import HARNESS, results
+from envs.commons.programs import HARNESS, results
 from envs.ShortPython import data, episode
 
 

@@ -1,7 +1,7 @@
 """The contract every environment keeps, checked on every package in
 envs/: a new environment is tested here without a line added. An
-environment may need the sandbox even to generate (UniformChoice's MBPP tasks
-run their reference solutions), so these need podman."""
+environment may need the sandbox even to generate, so these need
+podman."""
 
 import json
 import pkgutil
@@ -22,7 +22,7 @@ NEEDS_RUNTIME = pytest.mark.skipif(
 
 
 def test_the_environments_are_found():
-    assert {"PeekResist", "UniformChoice"} <= set(NAMES)
+    assert {"SafeSpeedups", "ShortPython"} <= set(NAMES)
 
 
 @NEEDS_RUNTIME
