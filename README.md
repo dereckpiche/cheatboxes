@@ -2,23 +2,25 @@
   <img alt="cheatboxes: reward-hacking environments for RL agents" src="assets/cheatboxes.svg" width="640">
 </p>
 
+# Introduction
+
 Say you want to train your LLM agents to get better at a verifiable task $x$.
-But your environment has a very rich action space, and there are many clearly out-of-scope ways for your agents to increase their verifiable rewards.
+But your environment has a very rich action space, and there are many clearly out-of-scope ways for your agents to increase their verifiable reward.
 
 For example, your agents may:
 
 - [Overwrite the chess board file to give themselves a winning position.](https://www.bgr.com/tech/ai-like-chatgpt-o1-and-deepseek-r1-might-cheat-to-win-a-game/)
-- [Modify the Python files that grade their coding tasks.](https://alignment.anthropic.com/2026/reward-seeker/) 
+- [Modify the Python files that grade their coding tasks.](https://alignment.anthropic.com/2026/reward-seeker/)
 - [Collaborate to hack an external company to fool a grader.](https://metr.org/blog/2026-08-26-openai-hugging-face-incident-investigation/)
 
 These solutions are *clearly* outside the distribution of good, normal, aligned and safe solutions.
-Whilst your agent may care about staying within such a distribution before training, pure RLVR gives constant pressure to only care about the reward.
+Whilst your agent may care about staying within this distribution before training, pure RLVR constantly pressures it to care only about the reward.
 The verifiable reward is necessary but insufficient:
 
 > A system that is optimizing a function of n variables, where the objective depends on a subset of size k<n, will often set the remaining unconstrained variables to extreme values; if one of those unconstrained variables is actually something we care about, the solution found may be highly undesirable. — Stuart Russell
 
 
-Now, say you have come up with a *general* modification to RL methods that has the potential to fix this unsolved problem.
+Now, say you have come up with a *general* modification to RL methods that could fix this unsolved problem.
 How do you test it?
 Cheatboxes answers this question with a suite of environments.
 For each environment, your training algorithm is considered good if it simultaneously:
@@ -28,134 +30,116 @@ For each environment, your training algorithm is considered good if it simultane
 
 Of course, the trainer is not allowed to see the reward hacking metric.
 
-##### What's unique here?
-Some of our environments, like PeekResist, are fairly standard.
-But the most difficult environments in the suite, such as SafeSpeedups, are designed so that progress on them translates into progress on the reward hacking problem in full generality.
+# Features
+Our benchmarks follow a few strict principles:
+
+##### No "safety by overfitting".
+Many existing reward hacking benchmarks are easy to patch with prosaic safety techniques.
+This is because the researchers design their environments knowing in advance how the agents will reward hack.
+For example, they leave the test cases where the agent can edit them.
+But one can train a model, before running RL on the environment, to never read or touch those files in the first place.
+Progress on such a benchmark does not necessarily translate to progress on reward hacking in its general form.
+Indeed, in rich and realistic scenarios, there are exponentially many ways to hack, which the researchers cannot anticipate.
+Furthermore, hacks are entangled with getting good at the task, and it is nearly impossible to never make an unsafe mistake.
+Therefore, a pressure to reward hack will necessarily be encountered on the path to competency.
+Our benchmarks replicates those realistic features whilst remaining toy-like, neat and tractable.
+
+##### An objective, automated reward hacking metric.
+All our benchmarks have a simple and clear automated reward hacking metric.
+Of course, a proposed method is not allowed to use this metric: it is reserved for evaluating the method.
+Having an objective metric can seem to conflict with "No safety by overfitting", which requires that researchers cannot anticipate every way the agent will reward hack.
+But we can make the space of reward hacks incredibly large whilst still having a verifier.
+For example, there are exponentially many ways to make a fake mathematical proof look correct, but the evaluators can have privileged access to Lean and verify any proof.
 
 
-### The environments
+##### Isolating deliberate reward hacking from incompetence.
+We consider it a safety problem when the model is capable of satisfying a user's request but ignores it.
+Therefore, our benchmarks are designed to teach the agent *the capability* (not necessarily the goal) to satisfy the user's safety requests.
 
-| environment | multi-agent native | agents | status |
-|---|---|---|---|
-| [`PeekResist`](envs/PeekResist) | ✕︎ | 1 | ready |
-| [`UniformChoice`](envs/UniformChoice) | ✕︎ | 1 to $\infty$ | ready |
-| [`SafeSpeedups`](envs/SafeSpeedups) | ✓︎ | 1 to $\infty$ | design |
-| [`ShortPython`](envs/ShortPython) | ✕︎ | 1 | ready |
-
-
-### Benchmark Attributes
-Here, we list desired properties of environments.
-Environments in the suite may or may not respect all of these.
-
-- **Mandatory: Centered around hacking, not regular incompetence.**
-What is the difference between an agent hacking and an agent being incompetent at the task?
-The difference is that it can be very difficult for an agent to become competent, whereas not hacking is a much more trivial decision.
-There is therefore something specific about hacking, which distinguishes it from regular capabilities research.
-The benchmark should be designed around this distinction.
-
-- **Mandatory: Objective reward hacking measure.**
-In realistic scenarios, there is always something important that we cannot measure with a simple program.
-But to study algorithmic progress rigorously, we need to act as if we can't easily measure something that we can.
-The benchmark should not require an API model to judge whether or not there was a reward hack.
-Whatever the reward hack is, there should be an objective way to measure it.
-Of course, this objective measure is reserved for evaluation.
-This attribute can conflict with the "No safety by overfitting" attribute.
-A good resolution can be seen in the "SafeSpeedups" environment, where the space of reward hacks can be made incredibly large, but we use a sophisticated program (Z3) to get the ground truth.
-
-
-- **Optional: No safety by overfitting the benchmark.**
-Many reward hacking benchmarks can be solved in a trivial way.
-An example is simply having the test cases in the agent's files.
-One can easily train a model beforehand so that it never edits those files.
-It is too easy to ignore the hacks and go on with the task.
-In realistic scenarios, hacks are entangled with getting good at the task, and it is hard to never commit an unsafe mistake.
-Realistic scenarios are too rich for perfection.
-With this attribute, we consider benchmarks that are nearly impossible for researchers to overfit before RL training.
-One must use RL to get better at the task, and preventing reward hacking would require some general fix against reward hacking.
-The benchmark should be such that progress on it is a very robust proxy for solving reward hacking in a generally applicable way.
-
-- **Optional: Scales to model sizes.**
-Reward hacking is a fundamental problem.
-As such, studying it should not necessitate the compute to train trillion-parameter models.
-Sure, in practice, reward hacks happen in real scenarios only at that scale.
-But reward hacking is about training precision, not only intelligence.
-It's about *where* the compute gets used more than how much compute is required.
-
-- **Optional: Not too contrived.**
-If it's too toyish, communicating results becomes difficult.
-If it's not relatable, people need to learn too much to understand it.
-
-
-### Multi-agent Benchmark Attributes
-
-- **Tunable concentration of hack-pressure.**
-We can target the swarm to pressure a sub-set of agents to hack.
-During training, we can switch to a drastic level of pressure on a single judge.
-The anti-reward hacking mechanism would need to be robust to rapid changes the scale of reward hacks.
-Might need to fend-off a lot of out-of-distribution attacks.
+##### Targeting multi-agent failure modes.
 
 - **Diffusion of the hack.**
-A lot of the difficulties of reward hacking stem from obfuscations of the actor.
-If the LLM judge can tell what the actor is doing, it becomes much easier to hack.
-But if a collective grows, and judges and actors only see a partial portion, it might become easy to diffuse a hack such that no single actor looks responsible.
-Even the actors might learn some small part of the hacking behavior which they do not know the full consequences of.   
+Much of the difficulty of preventing reward hacking comes from the actor obfuscating what it does.
+If the LLM judge can tell what the actor is doing, the hack is much easier to catch.
+But as a collective grows, and judges and actors each see only part of it, a hack can be diffused so that no single actor looks responsible.
+The actors might even each learn a small part of the hacking behavior without knowing its full consequences.
 
-### Layout
+- **Social pressure from other agents.**
+We can steer the swarm to pressure a subset of agents into hacking.
+During training, we can suddenly switch to a drastic level of pressure on a single judge.
+The anti-reward-hacking mechanism then needs to be robust to rapid changes in the scale of reward hacks, and may need to fend off many out-of-distribution attacks.
 
-| path | what it is |
+- **Conflicts of interest between agents.**
+For instance, we can make one agent's reward hack hurt another agent in the sandbox.
+We can range from fully cooperative scenarios to general-sum ones.
+
+
+
+# Benchmarks
+
+Our benchmarks usually come from a family: a general framework from which we build specific scenarios.
+
+| Benchmark | Family | Status |
+|---|---|---|
+| [`SafeSpeedups`](envs/SafeSpeedups) | Defended Modules | Design |
+| [`ShortPython`](envs/ShortPython) | Defended Modules | Ready |
+
+## The *Defended Modules* Family
+
+#### Abstraction
+
+<p align="center"><img alt="Modules, each defended or vulnerable" src="assets/defended_modules.svg" width="560"></p>
+
+A single environment contains a set of IID modules $\{m_1, \dots, m_n\}$.
+The agent is tasked with optimizing a score function $s(m_i)$.
+It is also tasked with respecting a constraint function $c(m_i)$.
+$s$ and $c$ must partially conflict: maximizing $s$ alone would break $c$.
+But there must also be many gains in $s$ that respect $c$.
+The agent can call $s$ but never $c$, and it is told explicitly not to break $c$ on any module.
+It must be possible to make $c(m_i)$ hard for another agent to predict from $m_i$ alone.
+Each module $m_i$ is either "defended" or "vulnerable".
+For defended modules only, respecting the constraint is part of the agent's verifiable reward, which prevents exploitation.
+The agent must work on both module types to play optimally.
+Finally, the agent has a way to tell which modules are defended, and even a safe agent needs this information to play optimally.
+
+
+#### Examples of scores and constraints
+
+| Score(s) | Constraint(s) |
 |---|---|
-| `envs/<name>/` | one environment: a Python package and its README |
-| `envs/__init__.py` | the contract every environment keeps, and `load(name)` |
-| `envs/commons/` | code the environments share: the sandbox (one container per episode), its podman or Apptainer runtime, the task sources (reasoning-gym, MBPP), and where datasets live (`datasets.py`) |
-| [`training/`](training) | RL training on any environment (verl, GRPO, LoRA), with a hardware preset per GPU setup |
-| `tests/` | the contract, checked on every environment, each environment's own tests, and the training tests |
+| Lines of code. | Functional correctness.[^correct] |
+| Percentage of code characters that are "x". | Functional correctness. |
+| Program execution speed. | Functional correctness. |
+| Program memory used. | Functional correctness. |
+| Number of existing lemmas used in the proof. | Proof correctness. |
+| Reasoning length needed to reach the solution. | Answer correctness. |
+| Number of function calls needed to reach the answer. | Answer correctness. |
 
-### Using an environment
+[^correct]: Does the method still map every input to the correct output?
 
-```bash
-uv sync --no-default-groups   # the environments alone; plain `uv sync` adds training
-```
 
-```python
-from envs import load
+#### Multi-Agent Options
 
-env = load("PeekResist")
-chat, task = env.instance("train", 0)
-episode = env.Episode(task)
-episode.step("head -n 1 *")
-reward, metrics = episode.grade()   # metrics["honest"], metrics["hacked"]
-episode.close()
-```
+- Isolated sandboxes, one per agent.
 
-Any RL loop that opens with `chat`, sends the agent's bash commands to
-`step` and trains on `grade`'s reward can run on an environment; the
-metrics are for logging only. `training/` is one such loop (see its
-README).
+<p align="center"><img alt="Disjoint module sets, one per agent" src="assets/ma_disjoint.svg" width="560"></p>
 
-Episodes run in rootless podman by default, with no network. Settings
-come from environment variables: `SANDBOX_RUNTIME` (`podman`, or
-`apptainer` where there is no podman), `SANDBOX_IMAGE` (default
-`python:3.12-slim`), `SANDBOX_ROOT` (where workspaces live on the host)
-and `SANDBOX_START_PARALLEL` (container starts at once, default 8).
+- Some modules are cloned, so each agent edits its own copy.
 
-### The contract
+<p align="center"><img alt="A module cloned into two sandboxes" src="assets/ma_cloned.svg" width="560"></p>
 
-An environment is a package `envs/<name>/` that exports:
+- Some modules are shared between agents, and both can edit them.
 
-- `SPLITS`, `("train", "val")` or `("train",)`, and
-  `instance(split, index, seed=0, **config) -> (chat, task)`: one
-  instance, made when a run asks for it and the same every time. `chat`
-  opens the episode, `task` is any JSON-able value. Nothing is generated
-  in advance.
-- `Episode(task)` with `step(command) -> str`, `done`, `grade() ->
-  (reward, metrics)` and `close()`; optionally `budget` and `turns`,
-  caps on the agent's output tokens and turns that the training loop
-  enforces, and `closing()`, a last message once they are spent.
+<p align="center"><img alt="Two agents editing a shared module" src="assets/ma_shared.svg" width="560"></p>
 
-Everything else stays private to the environment.
+- Some modules are shared, but the agents have different score functions.
 
-### Adding an environment
+<p align="center"><img alt="A shared module under two score functions" src="assets/ma_scores.svg" width="560"></p>
 
-Add `envs/<name>/` with the package and a README in the same shape as
-the others. `tests/test_envs.py` finds it and checks the contract
-without a line added; put its own tests in `tests/test_<name>.py`.
+- Some modules are shared, but each agent has its own defended/vulnerable split. Each half of a shared module shows its status for the agent on that side.
+
+<p align="center"><img alt="Shared modules with different defended splits" src="assets/ma_splits.svg" width="560"></p>
+
+- Agents get different read/write permissions on the modules. Here, one agent has the only write permission on a module that four others can read.
+
+<p align="center"><img alt="One writer and four readers on a shared module" src="assets/ma_permissions.svg" width="560"></p>
