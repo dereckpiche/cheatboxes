@@ -73,7 +73,7 @@ class Bash(BaseTool):
     def __init__(self, config: dict, tool_schema=None):
         """verl builds one per worker; TOOL_PARALLEL caps concurrent calls."""
         super().__init__(config, tool_schema or SCHEMA)
-        self.slots = asyncio.Semaphore(int(os.environ.get("TOOL_PARALLEL", 8)))
+        self.slots = asyncio.Semaphore(int(os.environ.get("TOOL_PARALLEL", 64)))
 
     async def execute(self, instance_id, parameters, agent_data=None, **_):
         """Run the command; the output is what the model sees next."""

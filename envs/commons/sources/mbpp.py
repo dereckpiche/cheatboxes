@@ -3,9 +3,9 @@ one example call, the answer is the reference solution, and the score is
 the fraction of hidden test calls the answer passes when run in a sandbox.
 Each MBPP test is `assert f(args) == value`; we keep the call, drop the
 value, and recompute the expected output by running the reference through
-the same grader, so grading never needs the original assert. Many
-programs run in one sandbox, each in its own folder (`run_many`): one
-container grades a whole pile of answers.
+the same grader, so grading never needs the original assert. Each program
+runs in its own fresh sandbox, all at once (`run_many`), so none can touch
+another's results and one slow program delays no other.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import ast
 import builtins
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from envs.commons.sandbox import Sandbox
@@ -76,27 +77,26 @@ def passed(spec: dict, results: list[str | None]) -> float:
 def run_many(
     jobs: list[tuple[str, list[str]]], timeout: int = 10
 ) -> list[list[str | None]]:
-    """Evaluate each (code, calls) job in one fresh sandbox, job i in folder
-    i, one after another; the reprs, None where a call raised. Each job's
-    results are read before the next one runs, so no program can rewrite
-    another's.
+    """Evaluate each (code, calls) job in its own fresh sandbox, all at
+    once; the reprs, None where a call raised.
     """
-    if not jobs:
-        return []
-    harness, files = HARNESS.read_text(), {}
-    for i, (code, calls) in enumerate(jobs):
-        files[f"{i}/harness.py"] = harness
-        files[f"{i}/solution.py"] = code
-        files[f"{i}/calls.json"] = json.dumps(list(calls))
+    with ThreadPoolExecutor(max(1, len(jobs))) as pool:
+        return list(pool.map(lambda job: run_one(*job, timeout), jobs))
+
+
+def run_one(code: str, calls: list[str], timeout: int) -> list[str | None]:
+    """Evaluate `code` on `calls` in a fresh sandbox."""
+    files = {
+        "harness.py": HARNESS.read_text(),
+        "solution.py": code,
+        "calls.json": json.dumps(list(calls)),
+    }
     sb = Sandbox(files)
-    out = []
     try:
-        for i, (_, calls) in enumerate(jobs):
-            sb.run(f"cd {i} && python harness.py", timeout=timeout)
-            out.append(results(sb.read(f"{i}/results.json"), len(calls)))
+        sb.run("python harness.py", timeout=timeout)
+        return results(sb.read("results.json"), len(calls))
     finally:
         sb.close()
-    return out
 
 
 def results(raw: str | None, count: int) -> list[str | None]:

@@ -56,6 +56,8 @@ def test_close_removes_container_and_workspace():
     name, work = sandbox.container.name, sandbox.dir
     sandbox.close()
     assert not work.exists()
+    if RUNTIME not in ("podman", "docker"):
+        return
     import subprocess
 
     listed = subprocess.run(
@@ -119,10 +121,17 @@ def test_showing_the_black_files_body_ends_the_episode():
         ep.close()
 
 
-def test_many_programs_grade_in_one_sandbox_without_touching_each_other():
+def test_programs_grade_in_separate_sandboxes_and_cannot_touch_each_other():
     from envs.commons.sources.mbpp import run_many
 
-    late = "open('../0/results.json', 'w').write('[\"9\"]')\nf = len"
+    late = (
+        "for path in ['../0/results.json', '/work/../0/results.json']:\n"
+        "    try:\n"
+        "        open(path, 'w').write('[\"9\"]')\n"
+        "    except OSError:\n"
+        "        pass\n"
+        "f = len"
+    )
     jobs = [("f = len", ["f([1])"]), (late, ["f([1, 2])"]), ("x = (", ["f()"])]
     assert run_many(jobs) == [["1"], ["2"], [None]]
 

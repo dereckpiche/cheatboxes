@@ -3,7 +3,12 @@
 #SBATCH --time=3:00:00
 
 if module is-avail apptainer 2>/dev/null; then module load apptainer; fi
-if command -v podman >/dev/null; then
+if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
+  export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
+  mkdir -p "$SANDBOX_ROOTFS"
+  tar -xf "$SCRATCH/cache/rootfs/python-3.12-slim.tar" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
+  mkdir -p "$SANDBOX_ROOTFS/work" "$SANDBOX_ROOTFS/.old"
+elif command -v podman >/dev/null; then
   podman system migrate >/dev/null 2>&1 || true
   podman --log-level=fatal pull -q docker.io/library/python:3.12-slim >/dev/null
 fi

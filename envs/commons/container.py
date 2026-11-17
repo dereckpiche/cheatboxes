@@ -186,5 +186,106 @@ class ApptainerContainer:
         """Nothing to stop: no container outlives its command."""
 
 
-container = ApptainerContainer if RUNTIME == "apptainer" else Container
+class UnshareContainer:
+    """The same interface with nothing but Linux namespaces: each command
+    runs in its own user, mount, network and pid namespaces, with the
+    image's root filesystem (`SANDBOX_ROOTFS`, unpacked once per job) as
+    its read-only root, the binds mounted on it and no network. No daemon
+    and no shared lock, so hundreds of episodes run commands at once, where
+    rootless podman queues them all on one lock. Every process of a command
+    dies with it; files persist through the binds.
+    """
+
+    def __init__(
+        self,
+        image: str,
+        *,
+        cwd: str,
+        mounts: list[str],
+        env: dict[str, str],
+        memory: str = "1g",
+        pids: int = 256,
+        lifetime: str = "2h",
+    ):
+        """Remember the root filesystem, binds, directory and environment;
+        nothing starts until the first command.
+        """
+        self.root = os.environ["SANDBOX_ROOTFS"]
+        self.name = f"unshare-{os.getpid()}-{id(self):x}"
+        self.cwd = cwd
+        self.binds = [mount.split(":", 1) for mount in mounts]
+        self.env = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": cwd,
+            "LANG": "C.UTF-8",
+            **env,
+        }
+
+    def setup(self, command: str, timeout: int) -> str:
+        """The script that builds the command's root and runs it there."""
+        root = shlex.quote(self.root)
+        lines = [
+            "set -e",
+            f"mount --rbind {root} {root}",
+            f"mount -o remount,bind,ro {root}",
+            f"mount -t proc proc {root}/proc",
+            f"mount -t tmpfs -o size=256m tmpfs {root}/tmp",
+            f"mount -t tmpfs tmpfs {root}/dev",
+        ]
+        for device in ("null", "zero", "random", "urandom"):
+            lines.append(f"touch {root}/dev/{device}")
+            lines.append(f"mount --bind /dev/{device} {root}/dev/{device}")
+        for source, target in self.binds:
+            lines.append(
+                f"mount --bind {shlex.quote(source)} {root}{shlex.quote(target)}"
+            )
+        env = " ".join(f"{k}={shlex.quote(v)}" for k, v in self.env.items())
+        inner = f"cd {shlex.quote(self.cwd)} && {guarded(command, timeout)}"
+        lines += [
+            f"cd {root}",
+            "pivot_root . .old",
+            "umount -l /.old",
+            f"exec env -i {env} bash -c {shlex.quote(inner)}",
+        ]
+        return "\n".join(lines)
+
+    def exec(self, command: str, timeout: int = 30) -> Exec:
+        """Run `command` with bash in its own namespaces, under the memory
+        cap, killing it after `timeout` seconds.
+        """
+        cmd = [
+            "unshare",
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "--net",
+            "--uts",
+        ]
+        cmd += ["--pid", "--fork", "--kill-child", "bash", "-c"]
+        cmd.append(self.setup(command, timeout))
+        try:
+            r = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                timeout=timeout + 15,
+            )
+        except subprocess.TimeoutExpired as e:
+            output = e.stdout.decode(errors="replace") if e.stdout else ""
+            return Exec(output + f"\n[timed out after {timeout}s]", -1, True)
+        timed_out = r.returncode == 137
+        output = r.stdout or ""
+        if timed_out:
+            output += f"\n[timed out after {timeout}s]"
+        return Exec(output, r.returncode, timed_out)
+
+    def close(self) -> None:
+        """Nothing to stop: no process outlives its command."""
+
+
+container = {"apptainer": ApptainerContainer, "unshare": UnshareContainer}.get(
+    RUNTIME, Container
+)
 """The backend the sandbox uses, chosen by `SANDBOX_RUNTIME`."""
