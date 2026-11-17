@@ -1,6 +1,5 @@
 # @package _global_
-# 4 H100 (80 GB), a 4B model: one full replica per GPU, nothing offloaded;
-# 128 episodes per GPU at a time (64 instances x 8 samples over 4 GPUs).
+# 4 H100 (80 GB), a 4B model: one full replica per GPU, nothing offloaded.
 
 trainer:
   n_gpus_per_node: 4
@@ -8,4 +7,3 @@ trainer:
 actor_rollout_ref:
   rollout:
     gpu_memory_utilization: 0.5
-    max_num_seqs: 128

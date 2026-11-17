@@ -114,7 +114,8 @@ env = { WANDB_MODE = "offline" }
 sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 16, mem-per-gpu = "124G" }
 
 [tool.cluv.clusters.nibi]
-sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:1", cpus-per-gpu = 14, mem-per-gpu = "250G" }
+env = { SANDBOX_RUNTIME = "unshare" }
+sbatch_args = { account = "rrg-bengioy-ad", gpus = "h100:2", cpus-per-gpu = 14, mem-per-gpu = "250G" }
 
 [tool.cluv.clusters.trillium-gpu]
 env = { WANDB_MODE = "offline" }

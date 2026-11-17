@@ -230,7 +230,7 @@ def test_every_preset_composes_with_the_recipe(monkeypatch):
         with initialize_config_dir(str(run.CONFIG), version_base=None):
             config = compose("train", [f"+hardware={preset.stem}"])
         assert config.trainer.n_gpus_per_node == count
-        assert config.data.train_batch_size == 64
+        assert config.data.train_batch_size == 8
         assert config.data.custom_cls.name == "Instances"
 
 

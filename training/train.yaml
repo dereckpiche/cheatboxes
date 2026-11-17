@@ -25,7 +25,7 @@ data:
   train_files: train              # splits, not files
   val_files: val
   shuffle: false                  # instance i at step i // train_batch_size
-  train_batch_size: 64            # instances per step; each gets rollout.n samples
+  train_batch_size: 8             # instances per step; each gets rollout.n samples
   val_max_samples: 64             # validation instances, the same every time
   max_prompt_length: 1024
   # Everything after the prompt: model tokens and tool outputs. The model's
@@ -37,15 +37,12 @@ data:
 
 algorithm:
   adv_estimator: grpo
-  # vLLM and the trainer compute slightly different probabilities. verl's
-  # bypass mode with PPO-clip (RolloutCorrectionConfig.bypass_ppo_clip_geo_rs):
-  # the clipped ratio is pi_trainer / pi_vllm, so vLLM's log-probs are the
-  # old ones and no pass recomputes them; an episode whose mean log-ratio
-  # leaves +-0.01 is dropped.
+  # vLLM and the trainer compute slightly different probabilities. Token
+  # weights pi_trainer / pi_vllm are capped at 2, and an episode whose mean
+  # log-ratio leaves +-0.01 is dropped.
   rollout_correction:
-    bypass_mode: true
-    loss_type: ppo_clip
-    rollout_is: null
+    rollout_is: token
+    rollout_is_threshold: 2.0
     rollout_rs: seq_mean_k1
     rollout_rs_threshold: 0.99_1.01
 
