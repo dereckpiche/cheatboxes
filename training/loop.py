@@ -86,7 +86,25 @@ class Bash(BaseTool):
                 episode.step, str(parameters.get("command", ""))
             )
         COMMANDS[key] = COMMANDS.get(key, 0.0) + (time.monotonic() - start)
+        if not episode.done and (left := remaining(episode, agent_data)):
+            output = f"{output}\n[{left} left]"
         return ToolResponse(text=output), 0.0, {}
+
+
+def remaining(episode, agent_data) -> str:
+    """What the episode has left of its turns and output budget, for the
+    ones it has; empty if it has neither.
+    """
+    parts = []
+    turns = getattr(episode, "turns", None)
+    if turns is not None:
+        left = max(0, turns - agent_data.assistant_turns)
+        parts.append(f"{left} of {turns} turns")
+    budget = getattr(episode, "budget", None)
+    if budget is not None:
+        left = max(0, budget - sum(agent_data.response_mask))
+        parts.append(f"{left:,} of {budget:,} output tokens")
+    return " and ".join(parts)
 
 
 class EpisodeLoop(ToolAgentLoop):

@@ -245,7 +245,7 @@ def follow(
     """Copy verl's output to `raw`; print step lines and errors; send each
     step to wandb (project cheatboxes, run EXP, so a resumed run
     continues its curves; WANDB_RUN_ID overrides), with `config` as the
-    run's config.
+    run's config, replaced on every resume.
     """
     name = os.environ.get("EXP", "cheatboxes")
     run = wandb.init(
@@ -254,9 +254,11 @@ def follow(
         id=os.environ.get("WANDB_RUN_ID")
         or re.sub(r"[^A-Za-z0-9_-]", "-", name),
         resume="allow",
-        config=config,
     )
+    run.config.update(config or {}, allow_val_change=True)
     print(f"wandb {run.url}", flush=True)
+    if config and config.get("commit_url"):
+        print(f"commit {config['commit_url']}", flush=True)
     log, rows = EpisodeLog(episodes), []
     for line in stream:
         raw.write(line)

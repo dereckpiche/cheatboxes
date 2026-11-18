@@ -48,7 +48,7 @@ class Sandbox:
             shutil.rmtree(self.dir, ignore_errors=True)
             raise
 
-    def run(self, command: str, timeout: int | None = None) -> Exec:
+    def run(self, command: str, timeout: float | None = None) -> Exec:
         """Run a bash command in the workspace."""
         return self.container.exec(command, timeout or self.timeout)
 

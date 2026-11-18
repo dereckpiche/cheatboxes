@@ -12,8 +12,10 @@ forum (forum/, envs.commons.forum); the console and wandb get a few lines
 per step (see training.progress).
 """
 
+import inspect
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -75,15 +77,12 @@ def validation(env: str) -> list[str]:
     return ["data.val_files=train"]
 
 
-def command(overrides: list[str], hardware: str) -> list[str]:
-    """The verl command line that trains on the `hardware` preset."""
+def recipe_overrides(overrides: list[str], hardware: str) -> list[str]:
+    """Everything verl gets on top of the recipe: the agent loop, the
+    `hardware` preset, then the command line's overrides.
+    """
     rollout = "actor_rollout_ref.rollout"
     return [
-        sys.executable,
-        "-m",
-        "verl.trainer.main_ppo",
-        f"--config-path={CONFIG}",
-        "--config-name=train",
         f"{rollout}.multi_turn.tool_config_path={CONFIG / 'tools.yaml'}",
         f"{rollout}.agent.agent_loop_config_path={CONFIG / 'loops.yaml'}",
         f"{rollout}.agent.default_agent_loop=episode",
@@ -91,6 +90,42 @@ def command(overrides: list[str], hardware: str) -> list[str]:
         f"+hardware={hardware}",
         *overrides,
     ]
+
+
+def command(overrides: list[str], hardware: str) -> list[str]:
+    """The verl command line that trains on the `hardware` preset."""
+    return [
+        sys.executable,
+        "-m",
+        "verl.trainer.main_ppo",
+        f"--config-path={CONFIG}",
+        "--config-name=train",
+        *recipe_overrides(overrides, hardware),
+    ]
+
+
+def resolved_recipe(overrides: list[str], hardware: str) -> dict:
+    """The whole config verl runs with, every value resolved."""
+    from hydra import compose, initialize_config_dir
+    from omegaconf import OmegaConf
+
+    with initialize_config_dir(str(CONFIG), version_base=None):
+        config = compose("train", recipe_overrides(overrides, hardware))
+    return OmegaConf.to_container(config, resolve=True)
+
+
+def environment_settings(recipe: dict) -> dict:
+    """The environment's settings: its `instance` defaults, then the run's
+    `data.env_config`.
+    """
+    environment = envs.load(recipe["data"]["env"])
+    parameters = inspect.signature(environment.instance).parameters
+    defaults = {
+        name: parameter.default
+        for name, parameter in parameters.items()
+        if parameter.default is not inspect.Parameter.empty and name != "seed"
+    }
+    return defaults | (recipe["data"].get("env_config") or {})
 
 
 STALL_MINUTES = 45
@@ -126,15 +161,28 @@ def crashed(log: Path, start: int) -> int:
         return int(HYDRA_FAILURE in file.read())
 
 
-def checkout() -> str:
-    """The commit the code runs from: cluv updates the checkout in place,
-    so a job can run newer code than the commit it was submitted at."""
+def git(*arguments: str) -> str:
+    """The output of a git command run in the repository."""
     found = subprocess.run(
-        ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
+        ["git", "-C", str(ROOT), *arguments], capture_output=True, text=True
     )
     return found.stdout.strip()
+
+
+def checkout() -> dict:
+    """The commit the code runs from, its link, and whether files differ
+    from it: cluv updates the checkout in place, so a job can run newer code
+    than the commit it was submitted at.
+    """
+    commit = git("rev-parse", "HEAD")
+    remote = git("remote", "get-url", "origin")
+    repository = re.sub(r"^git@([^:]+):", r"https://\1/", remote)
+    repository = repository.removesuffix(".git")
+    return {
+        "commit": commit,
+        "commit_url": f"{repository}/commit/{commit}" if remote else "",
+        "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
+    }
 
 
 def main() -> None:
@@ -160,6 +208,7 @@ def main() -> None:
     )
     paths = [str(ROOT), os.environ.get("PYTHONPATH", "")]
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
+    recipe = resolved_recipe(overrides, hardware)
     verl = subprocess.Popen(
         command(overrides, hardware),
         stdout=subprocess.PIPE,
@@ -174,9 +223,13 @@ def main() -> None:
         "hardware": hardware,
         "gpu": found[0],
         "gpus": len(found),
-        "commit": checkout(),
+        **checkout(),
+        "env_config": environment_settings(recipe),
+        "verl": recipe,
     }
-    (run_dir / "run.json").write_text(json.dumps(config, indent=2) + "\n")
+    (run_dir / "run.json").write_text(
+        json.dumps(config, indent=2, default=str) + "\n"
+    )
     threading.Thread(
         target=watchdog,
         args=(verl, Path(os.environ["EPISODE_LOG"]), STALL_MINUTES),

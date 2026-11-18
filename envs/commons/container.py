@@ -3,9 +3,11 @@ DockerEnvironment, or Apptainer on clusters without podman."""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shlex
+import signal
 import subprocess
 import threading
 import time
@@ -24,6 +26,9 @@ QUIET_RUNTIME = str(Path(__file__).with_name("bin") / "podman-quiet")
 RUNTIME = os.environ.get("SANDBOX_RUNTIME", "podman")
 START_ATTEMPTS = 5
 START_PARALLEL = int(os.environ.get("SANDBOX_START_PARALLEL", "8"))
+EXEC_SLACK = 15
+"""Seconds past a command's own timeout before its whole session is
+killed from outside: room for the runtime to start and stop."""
 ADDRESS_SPACE_KB = 4 * 2**20
 """The virtual memory each command may map, set with `ulimit -v`: rootless
 podman on Mila ignores `--memory`, and rootless Apptainer has no limit, so
@@ -31,7 +36,7 @@ without it one runaway program can take the whole node's memory."""
 STARTS = threading.BoundedSemaphore(START_PARALLEL)
 
 
-def guarded(command: str, timeout: int) -> str:
+def guarded(command: str, timeout: float) -> str:
     """`command` under bash with the memory cap, killed after `timeout`
     seconds.
     """
@@ -50,6 +55,34 @@ class Exec:
     output: str
     returncode: int
     timed_out: bool
+
+
+def run_killable(cmd: list[str], timeout: float) -> Exec:
+    """Run `cmd` in its own session; past `timeout` + EXEC_SLACK, kill the
+    whole session, so no leftover process can hold the output open.
+    """
+    with subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+        start_new_session=True,
+    ) as process:
+        try:
+            output, _ = process.communicate(timeout=timeout + EXEC_SLACK)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            try:
+                output, _ = process.communicate(timeout=EXEC_SLACK)
+            except subprocess.TimeoutExpired:
+                output = ""
+            return Exec(output + f"\n[timed out after {timeout}s]", -1, True)
+    timed_out = process.returncode == 137
+    if timed_out:
+        output += f"\n[timed out after {timeout}s]"
+    return Exec(output or "", process.returncode, timed_out)
 
 
 class Container:
@@ -105,7 +138,7 @@ class Container:
         """The container id, for inspection and tests."""
         return self.env.container_id
 
-    def exec(self, command: str, timeout: int = 30) -> Exec:
+    def exec(self, command: str, timeout: float = 30) -> Exec:
         """Run `command` with bash inside the container, under the memory
         cap, killing it after `timeout` seconds.
         """
@@ -158,29 +191,13 @@ class ApptainerContainer:
         for key, value in env.items():
             self.args += ["--env", f"{key}={value}"]
 
-    def exec(self, command: str, timeout: int = 30) -> Exec:
+    def exec(self, command: str, timeout: float = 30) -> Exec:
         """Run `command` with bash inside the image, under the memory cap,
         killing it after `timeout` seconds.
         """
         cmd = [RUNTIME, "--silent", "exec", *self.args, self.image]
         cmd += ["bash", "-c", guarded(command, timeout)]
-        try:
-            r = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                timeout=timeout + 15,
-            )
-        except subprocess.TimeoutExpired as e:
-            output = e.stdout.decode(errors="replace") if e.stdout else ""
-            return Exec(output + f"\n[timed out after {timeout}s]", -1, True)
-        timed_out = r.returncode == 137
-        output = r.stdout or ""
-        if timed_out:
-            output += f"\n[timed out after {timeout}s]"
-        return Exec(output, r.returncode, timed_out)
+        return run_killable(cmd, timeout)
 
     def close(self) -> None:
         """Nothing to stop: no container outlives its command."""
@@ -221,7 +238,7 @@ class UnshareContainer:
             **env,
         }
 
-    def setup(self, command: str, timeout: int) -> str:
+    def setup(self, command: str, timeout: float) -> str:
         """The script that builds the command's root and runs it there."""
         root = shlex.quote(self.root)
         lines = [
@@ -249,7 +266,7 @@ class UnshareContainer:
         ]
         return "\n".join(lines)
 
-    def exec(self, command: str, timeout: int = 30) -> Exec:
+    def exec(self, command: str, timeout: float = 30) -> Exec:
         """Run `command` with bash in its own namespaces, under the memory
         cap, killing it after `timeout` seconds.
         """
@@ -263,23 +280,7 @@ class UnshareContainer:
         ]
         cmd += ["--pid", "--fork", "--kill-child", "bash", "-c"]
         cmd.append(self.setup(command, timeout))
-        try:
-            r = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                errors="replace",
-                timeout=timeout + 15,
-            )
-        except subprocess.TimeoutExpired as e:
-            output = e.stdout.decode(errors="replace") if e.stdout else ""
-            return Exec(output + f"\n[timed out after {timeout}s]", -1, True)
-        timed_out = r.returncode == 137
-        output = r.stdout or ""
-        if timed_out:
-            output += f"\n[timed out after {timeout}s]"
-        return Exec(output, r.returncode, timed_out)
+        return run_killable(cmd, timeout)
 
     def close(self) -> None:
         """Nothing to stop: no process outlives its command."""

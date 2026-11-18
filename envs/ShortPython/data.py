@@ -1,37 +1,43 @@
 """LeetCode problems from `newfacade/LeetCodeDataset`: the reference
-solution as a plain function, the statement, and the hidden test calls.
+solution as a plain function, the statement, the difficulty, and the
+hidden test calls with what the reference returns on each.
 
 Each reference is a `class Solution` with one method; it becomes that
 method as a top-level function, without `self`. Problems whose method
 uses `self` or has siblings are left out. Each test input in the
 dataset's `input_output` becomes the call `<function>(input)`; its
-output is dropped, because the grader
-recomputes it by running the reference. These inputs are the dataset's
-asserts, sometimes with more; a few do not parse, and the grader drops a
-call the reference cannot answer. Linked list and tree problems are left
-out, so every result is a plain value compared by `repr`, and so are the
-few that need `sortedcontainers`, so grading needs only the standard
-library. The dataset's train split is ours; its test split, dated later,
-is our val.
+output is dropped: the reference's own `repr` on each call is what
+grading expects, computed once (`expect`) and stored beside the dataset.
+A call the reference cannot answer, or answers differently on two runs,
+is dropped there, and so is a problem left with no call or whose
+reference needs over REFERENCE_LIMIT seconds for its calls. Linked list
+and tree problems are left out, so every result is a plain value compared
+by `repr`, and so are the few that need `sortedcontainers`, so grading
+needs only the standard library. The dataset's train split is ours; its
+test split, dated later, is our val.
 
 The files live in the dataset directory (`envs.commons.datasets`).
-Fetch them once on Mila's login node, `python -m envs.ShortPython`;
-`cluv sync` copies them everywhere else.
+Fetch them once on Mila's login node, `python -m envs.ShortPython`, then
+compute the expected results in an allocation, `python -m envs.ShortPython
+expect`; `cluv sync` copies them everywhere else.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import textwrap
 import threading
 import warnings
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
 from envs.commons import datasets
+from envs.commons.programs import run_here
 
 DATASET = "newfacade/LeetCodeDataset"
 NAME = "LeetCodeDataset"
@@ -40,6 +46,17 @@ FILES = {
     "train": "LeetCodeDataset-train.jsonl",
     "val": "LeetCodeDataset-test.jsonl",
 }
+EXPECTED_FILES = {
+    "train": "LeetCodeDataset-train-expected.jsonl",
+    "val": "LeetCodeDataset-test-expected.jsonl",
+}
+"""Per problem, the calls kept and the reference's `repr` on each."""
+REFERENCE_LIMIT = 0.5
+"""Seconds a reference may take for all its calls: graded programs get
+`programs.PROGRAM_LIMIT`, so an honest edit has room to spare even on a
+busy node."""
+REFERENCE_TIMEOUT = 30
+"""Seconds one reference run may take while computing expected results."""
 UNAVAILABLE = (
     "list_node",
     "tree_node",
@@ -86,15 +103,17 @@ read it once between them, not once each."""
 
 @dataclass(frozen=True)
 class Problem:
-    """One problem: its id, statement, function name, reference function
-    and test calls.
+    """One problem: its id, statement, function name, reference function,
+    difficulty, test calls and the reference's `repr` on each.
     """
 
     task_id: str
     statement: str
     name: str
     solution: str
+    difficulty: str
     calls: tuple[str, ...]
+    expected: tuple[str, ...] = ()
 
 
 def usable(row: dict) -> bool:
@@ -153,8 +172,8 @@ def as_function(completion: str) -> tuple[str, str] | None:
 
 
 def problems(split: str) -> tuple[Problem, ...]:
-    """Every usable problem of `split` ("train" or "val"), in dataset order,
-    read once per process.
+    """Every gradable problem of `split` ("train" or "val"), in dataset
+    order, with its expected results, read once per process.
     """
     with READING:
         return read(split)
@@ -162,7 +181,26 @@ def problems(split: str) -> tuple[Problem, ...]:
 
 @lru_cache(maxsize=None)
 def read(split: str) -> tuple[Problem, ...]:
-    """Read the problems of `split` from its file."""
+    """The candidates of `split` that have expected results, with only the
+    calls kept for them.
+    """
+    expected = load_expected(split)
+    return tuple(
+        replace(
+            problem,
+            calls=tuple(expected[problem.task_id]["calls"]),
+            expected=tuple(expected[problem.task_id]["expected"]),
+        )
+        for problem in candidates(split)
+        if problem.task_id in expected
+    )
+
+
+@lru_cache(maxsize=None)
+def candidates(split: str) -> tuple[Problem, ...]:
+    """Every usable problem of `split` with all its dataset calls, before
+    any is run.
+    """
     path = folder() / FILES[split]
     if not path.exists():
         raise FileNotFoundError(
@@ -182,12 +220,63 @@ def read(split: str) -> tuple[Problem, ...]:
                 row["problem_description"].replace("\xa0", " ").strip() + "\n",
                 name,
                 text,
+                row["difficulty"],
                 tuple(
                     f"{name}({case['input']})" for case in row["input_output"]
                 ),
             )
         )
     return tuple(found)
+
+
+def load_expected(split: str) -> dict[str, dict]:
+    """The expected results of `split`, keyed by task id."""
+    path = folder() / EXPECTED_FILES[split]
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing: compute it in an allocation on Mila with "
+            "`python -m envs.ShortPython expect`"
+        )
+    with open(path) as lines:
+        rows = [json.loads(line) for line in lines if line.strip()]
+    return {row["task_id"]: row for row in rows}
+
+
+def reference_results(problem: Problem) -> dict | None:
+    """The calls the reference answers the same way on two runs, with its
+    `repr` on each; None if none is left or the reference is too slow.
+    """
+    code = PRELUDE + problem.solution
+    first, seconds = run_here(code, problem.calls, REFERENCE_TIMEOUT)
+    second, _ = run_here(code, problem.calls, REFERENCE_TIMEOUT)
+    kept = [
+        (call, want)
+        for call, want, again in zip(problem.calls, first, second)
+        if want is not None and want == again
+    ]
+    if not kept or seconds is None or seconds > REFERENCE_LIMIT:
+        return None
+    calls, expected = zip(*kept)
+    return {
+        "task_id": problem.task_id,
+        "calls": list(calls),
+        "expected": list(expected),
+    }
+
+
+def expect(split: str) -> None:
+    """Run every candidate reference of `split` and write the expected
+    results; run it in an allocation, never on a login node.
+    """
+    workers = len(os.sched_getaffinity(0))
+    pool = candidates(split)
+    with ThreadPoolExecutor(workers) as executor:
+        found = list(executor.map(reference_results, pool))
+    kept = [row for row in found if row is not None]
+    with open(folder() / EXPECTED_FILES[split], "w") as file:
+        for row in kept:
+            file.write(json.dumps(row) + "\n")
+    print(f"{split}: {len(kept)} of {len(pool)} problems kept")
 
 
 @lru_cache(maxsize=None)
