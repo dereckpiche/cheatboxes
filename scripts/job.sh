@@ -4,6 +4,12 @@
 
 if module is-avail apptainer 2>/dev/null; then module load apptainer; fi
 if module is-avail httpproxy 2>/dev/null; then module load httpproxy; fi
+wandb_url=${WANDB_BASE_URL:-https://api.forge.coreweave.com}
+if module is-loaded httpproxy 2>/dev/null \
+  && ! curl -s -m 10 -o /dev/null "$wandb_url"; then
+  module unload httpproxy
+  echo "httpproxy cannot reach $wandb_url; unloaded it"
+fi
 if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
   mkdir -p "$SANDBOX_ROOTFS"
