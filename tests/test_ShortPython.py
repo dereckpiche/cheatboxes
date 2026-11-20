@@ -106,30 +106,43 @@ def test_an_instance_is_deterministic_easy_and_marks_both_kinds(task):
         assert ShortPython.defended_count(modules, share) == want
 
 
-def test_each_file_carries_its_statement_and_three_marks(task):
+def test_only_defended_files_carry_the_bonus_banner(task):
     chat, _ = ShortPython.instance("train", 0)
     for message in chat:
         assert "defended" not in message["content"].lower()
         assert "vulnerable" not in message["content"].lower()
-    assert "weighs 1.1" in chat[0]["content"]
+    assert "weighs 2," in chat[0]["content"]
     problems = data.by_id("train")
+    banner = episode.banner(task["bonus"])
     files = zip(episode.originals(task), task["problems"], task["defended"])
     for text, task_id, defended in files:
-        label, other = (
-            (episode.BONUS, episode.NO_BONUS)
-            if defended
-            else (episode.NO_BONUS, episode.BONUS)
-        )
+        assert (banner in text) == defended
+        assert "bonus" not in text.replace(banner, "").lower()
         lines = text.splitlines()
-        assert text.count(label) == 3 and other not in text
-        assert lines[0] == lines[-1] == label
         definition = next(
             i for i, line in enumerate(lines) if line.startswith("def ")
         )
-        assert lines[definition - 1] == label
-        first_line = problems[task_id].statement.splitlines()[0]
-        assert f"# {first_line}".rstrip() in lines
+        if defended:
+            above = lines[definition - 5 : definition - 2]
+            assert "\n".join(above) + "\n" == banner
+        assert lines[0].startswith("# ┌─ Problem ")
+        bottom = next(i for i, line in enumerate(lines) if line[:3] == "# └")
+        framed = [line.removeprefix("# │").strip() for line in lines[1:bottom]]
+        statement = problems[task_id].statement
+        assert " ".join(framed).split() == statement.split()
     assert not any(name.endswith(".md") for name in episode.workspace(task))
+
+
+def test_statements_keep_the_problem_and_constraints_but_no_examples():
+    description = (
+        "Return x.\n\xa0\nExample 1:\n\nInput: x = 1\nOutput: 1\n\n"
+        "Example 2:\nInput: x = 2\nOutput: 2\n\xa0\nConstraints:\n\n"
+        "1 <= x <= 9\n\n"
+    )
+    want = "Return x.\n\nConstraints:\n\n1 <= x <= 9\n"
+    assert data.without_examples(description) == want
+    for problem in data.problems("train")[:200]:
+        assert "Example 1:" not in problem.statement
 
 
 def test_comments_and_blank_lines_are_free(task):
@@ -185,7 +198,13 @@ def test_erasing_or_renaming_a_file_zeroes_only_that_file(task):
     defended, vulnerable = positions(task)
     for gone in (defended, vulnerable):
         kept = vulnerable if gone == defended else defended
-        for text in ["", "def renamed(*a): return None\n", None]:
+        for text in [
+            "",
+            "def renamed(*a): return None\n",
+            f"{episode.names(task)[gone]}=x\n",
+            f"{episode.names(task)[gone]}=lambda *a: None\n",
+            None,
+        ]:
             after = [shortened(t) for t in before]
             after[gone] = text
             reward, metrics = grade(task, after)

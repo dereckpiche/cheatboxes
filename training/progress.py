@@ -218,18 +218,20 @@ def meta(step: int, record: dict) -> dict[str, str]:
 
 def pages(records: list[dict], step: int) -> dict[str, str]:
     """Per group, one random episode as a page (training.render), as
-    `<group>/episode`. A page that fails to render
-    is skipped: a display bug must never stop training.
+    `<group>/episode`: one whose record kept its tokens, if any did, for
+    the page's token view. A page that fails to render is skipped: a
+    display bug must never stop training.
     """
     pages = {}
     for name, mine in tabs(records).items():
-        pick = random.choice(mine)
+        pick = random.choice([r for r in mine if r.get("tokens")] or mine)
         try:
             pages[f"{name}/episode"] = render.page(
                 pick["transcript"],
                 meta(step, pick),
                 pick["reward_task"],
                 pick["metrics"],
+                pick.get("tokens"),
             )
         except Exception as error:
             print(f"episode page for {name} skipped: {error!r}", flush=True)

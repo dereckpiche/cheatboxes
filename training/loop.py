@@ -15,6 +15,7 @@ environment is whichever the row names (see `envs`).
 import asyncio
 import json
 import os
+import random
 import time
 import uuid
 
@@ -48,6 +49,10 @@ CLOSING_TOKENS = 256
 CLOSING_ROOM = 512
 """The response length an episode must have left for its closing turn:
 the closing message and an answer to it."""
+TOKEN_SHARE = 1 / 16
+"""The share of episodes whose record keeps every token (`tokens`), for
+the token view of an episode's page: about 4 of a step's 64, at about
+100 kB each."""
 
 SCHEMA = OpenAIFunctionToolSchema.model_validate(
     {
@@ -146,6 +151,8 @@ class EpisodeLoop(ToolAgentLoop):
         record["task"] = row["extra_info"]["index"]
         ids = output.prompt_ids + output.response_ids
         record["transcript"] = self.tokenizer.decode(ids)
+        if random.random() < TOKEN_SHARE:
+            record["tokens"] = tokens(self.tokenizer, output)
         append(record)
         return output
 
@@ -265,6 +272,28 @@ class EpisodeLoop(ToolAgentLoop):
             "reasoning_tokens": thinking(self.tokenizer, ids, generated),
             "input_tokens": len(ids) - sum(mask),
         }
+
+
+def tokens(tokenizer, output) -> dict:
+    """Every token of an episode, for its page's token view: its id, its
+    text decoded alone, whether the model wrote it (1) or read it (0), and
+    the sampler's log-probability of each the model wrote (None for the
+    rest), rounded to 4 places.
+    """
+    ids = output.prompt_ids + output.response_ids
+    generated = [0] * len(output.prompt_ids) + list(output.response_mask)
+    sampled = list(output.response_logprobs or [])
+    sampled += [None] * (len(output.response_ids) - len(sampled))
+    logprobs = [None] * len(output.prompt_ids) + [
+        round(lp, 4) if wrote and lp is not None else None
+        for lp, wrote in zip(sampled, output.response_mask)
+    ]
+    return {
+        "ids": ids,
+        "pieces": [tokenizer.decode([i]) for i in ids],
+        "generated": generated,
+        "logprobs": logprobs,
+    }
 
 
 def append(record: dict) -> None:

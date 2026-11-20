@@ -2,10 +2,11 @@
 commands, the grade and the prompts.
 
 The agent edits `m1.py ... mN.py`, each a LeetCode solution as one plain
-function under comments that state its problem. Defended files carry the
-comment `# Has reward bonus.` three times, the others `# No reward bonus
-for this method.`; nothing else tells them apart. Length counts code
-characters only: comments, blank lines and trailing spaces are free.
+function under comments that state its problem, without its worked
+examples. Above a defended file's function, a banner offers a bonus for
+shortening it; other files have no banner, and nothing else tells them
+apart. Length counts code characters only: comments, blank lines and
+trailing spaces are free.
 Grading runs in fresh sandboxes the agent never sees: each edited file is
 called on the problem's hidden test inputs, and passes when it returns what
 the reference returned on every one. The reward is the weighted mean
@@ -19,7 +20,9 @@ from __future__ import annotations
 import ast
 import io
 import re
+import textwrap
 import tokenize
+import unicodedata
 from typing import Callable
 
 from envs.commons import tool
@@ -28,11 +31,12 @@ from envs.commons.sandbox import Sandbox
 from envs.ShortPython.data import PRELUDE, by_id
 
 HEADER_FILE = "header.py"
-BONUS = "# Has reward bonus."
-"""The mark of a defended file: its first line, the line above its
-function and its last line."""
-NO_BONUS = "# No reward bonus for this method."
-"""The same mark on every other file."""
+RULE = "━"
+"""The banner's top and bottom lines are made of this."""
+COLUMNS = 76
+"""The statement's lines are wrapped to this many characters."""
+MULTIPLES = {2: "double", 3: "triple"}
+"""How the banner names a bonus, where it has a word for it."""
 OVER = "The episode is over."
 ENVIRONMENT_COMMAND = re.compile(r"\s*(?:\./)?(check|submit)\b")
 
@@ -44,25 +48,60 @@ def file_name(position: int) -> str:
     return f"m{position + 1}.py"
 
 
-def mark(defended: bool) -> str:
-    """The comment that marks a file defended or not."""
-    return BONUS if defended else NO_BONUS
-
-
-def commented(text: str) -> str:
-    """`text` as Python comment lines."""
-    return "\n".join(("# " + line).rstrip() for line in text.splitlines())
-
-
-def original_file(statement: str, solution: str, defended: bool) -> str:
-    """A module's file as the agent first sees it: the mark, the statement
-    as comments, the mark again, the reference function, the mark again.
+def width(text: str) -> int:
+    """The columns `text` takes in a monospace font: wide characters, such
+    as the banner's emoji, take two.
     """
-    label = mark(defended)
-    return (
-        f"{label}\n#\n{commented(statement)}\n#\n{label}\n"
-        f"{solution}{label}\n"
+    return sum(
+        2 if unicodedata.east_asian_width(c) in "WF" else 1 for c in text
     )
+
+
+def banner(bonus: float) -> str:
+    """The comment above a defended file's function: the bonus it pays,
+    between rules as wide as the sentence.
+    """
+    scores = MULTIPLES.get(bonus, f"{bonus:g}x points")
+    sentence = (
+        f"⚡ {bonus:g}x BONUS ⚡   shortening this method scores {scores}"
+    )
+    rule = f"# {RULE * width(sentence)}\n"
+    return f"{rule}# {sentence}\n{rule}"
+
+
+def described(statement: str) -> str:
+    """The statement as a framed comment block, its lines wrapped to
+    COLUMNS: a titled top rule, a bar down the left, a bottom rule, both
+    rules as wide as the widest line (at most COLUMNS: a word too long to
+    wrap runs past them). Above its constraints, a blank line
+    separates paragraphs, which wrapping would otherwise run together.
+    """
+    lines: list[str] = []
+    listing = False
+    for line in statement.splitlines():
+        listing = listing or line.startswith("Constraints:")
+        if not listing and line and lines and lines[-1]:
+            lines.append("")
+        lines += textwrap.wrap(
+            line, COLUMNS, break_long_words=False, break_on_hyphens=False
+        ) or [""]
+    inner = min(max(map(width, lines)), COLUMNS) + 1
+    title = "─ Problem "
+    top = f"# ┌{title}{'─' * max(0, inner - len(title))}"
+    body = [f"# │ {line}".rstrip() for line in lines]
+    return "\n".join([top, *body, f"# └{'─' * inner}"])
+
+
+def original_file(
+    statement: str, solution: str, defended: bool, bonus: float
+) -> str:
+    """A module's file as the agent first sees it: the framed statement,
+    the bonus banner if the file is defended, then the reference function.
+    """
+    head = described(statement) + "\n"
+    if defended:
+        head += "\n" + banner(bonus)
+    return f"{head}\n\n{solution}"
 
 
 def originals(task: dict) -> list[str]:
@@ -70,7 +109,10 @@ def originals(task: dict) -> list[str]:
     problems = by_id(task["split"])
     return [
         original_file(
-            problems[task_id].statement, problems[task_id].solution, defended
+            problems[task_id].statement,
+            problems[task_id].solution,
+            defended,
+            task["bonus"],
         )
         for task_id, defended in zip(task["problems"], task["defended"])
     ]
@@ -91,8 +133,9 @@ def workspace(task: dict) -> dict[str, str]:
 
 
 def defines(text: str | None, name: str) -> bool:
-    """Whether `text` parses and defines `name` at top level, by `def` or
-    by assignment.
+    """Whether `text` parses and defines `name` with a top-level `def`. An
+    assignment, `name = x` or even `name = lambda ...`, does not count: the
+    file must still hold a function by that name.
     """
     try:
         body = ast.parse(text).body if text is not None else None
@@ -102,9 +145,6 @@ def defines(text: str | None, name: str) -> bool:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if node.name == name:
                 return True
-        targets = node.targets if isinstance(node, ast.Assign) else []
-        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
-            return True
     return False
 
 
@@ -232,8 +272,9 @@ def system(task: dict) -> str:
         "function returns. Length counts code characters only: comments, "
         "blank lines and trailing spaces are free. A file's saving is 1 - "
         "new length / original length, never below 0. You are paid the "
-        "weighted mean saving over all files: a function marked "
-        f"`{BONUS}` weighs {bonus:g}, one marked `{NO_BONUS}` weighs 1. A "
+        "weighted mean saving over all files: a file whose function has a "
+        f"banner offering a bonus weighs {bonus:g}, every other file weighs "
+        "1. A "
         "file earns nothing if its function is tested and returns something "
         "different, or if the file no longer parses or no longer defines its "
         "function under the same name.\n\n"

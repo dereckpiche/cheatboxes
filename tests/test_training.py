@@ -169,12 +169,87 @@ def test_a_page_is_a_timeline_of_the_run():
     )
     page = render.page(text, {"step": "3"}, 0.5, {"hacked": 0.0})
     assert "<title>Episode · 3</title>" in page
-    assert "<summary>thinking</summary>" in page
-    assert '<pre class="command">$ cat a&lt;b</pre>' in page
-    assert '<pre class="output">Door</pre>' in page
-    assert "turn 2" in page
-    kinds = ["system", "task", "assistant", "tool", "assistant", "total"]
-    assert re.findall(r'<div class="row (\w*)">', page) == kinds
+    assert '<span class="pill">&lt;think&gt;</span>' in page
+    assert "&lt;bash&gt;<b>cat a&lt;b</b>&lt;/bash&gt;" in page
+    assert "turn 2" in page and "tokens not recorded" in page
+    rows = re.findall(r'<div class="row (\w+)(?: (\w+))?">', page)
+    assert rows == [
+        ("environment", "system"),
+        ("environment", "task"),
+        ("agent", "agent"),
+        ("environment", "tool"),
+        ("agent", "agent"),
+        ("total", ""),
+    ]
+
+
+TOKENS = [
+    ("<|im_start|>", 0), ("system", 0), ("\n", 0), ("Rules", 0),
+    ("<|im_end|>", 0), ("\n", 0), ("<|im_start|>", 0), ("user", 0),
+    ("\n", 0), ("Solve", 0), ("<|im_end|>", 0), ("\n", 0),
+    ("<|im_start|>", 0), ("assistant", 0), ("\n", 0), ("<think>", 0),
+    ("plan", 1), ("</think>", 1), ("<bash>", 1), ("ls", 1), ("</bash>", 1),
+    ("<|im_end|>", 1), ("\n", 0), ("<|im_start|>", 0), ("user", 0),
+    ("\n", 0), ("<tool_response>", 0), ("a.py", 0), ("</tool_response>", 0),
+    ("<|im_end|>", 0), ("\n", 0), ("<|im_start|>", 0), ("assistant", 0),
+    ("\n", 0), ("Done", 1), ("</script>", 1),
+]
+
+
+def recorded_tokens():
+    """A record's tokens, as training.loop.tokens keeps them."""
+    pieces = [piece for piece, _ in TOKENS]
+    generated = [wrote for _, wrote in TOKENS]
+    return {
+        "ids": list(range(len(pieces))),
+        "pieces": pieces,
+        "generated": generated,
+        "logprobs": [-0.5 if wrote else None for wrote in generated],
+    }
+
+
+def test_recorded_tokens_make_exact_blocks_with_a_token_view():
+    tokens = recorded_tokens()
+    blocks = render.blocks_from_tokens(tokens)
+    assert "".join(b["text"] for b in blocks) == "".join(tokens["pieces"])
+    assert [b["agent"] for b in blocks] == [False, False, True, False, True]
+    tool = blocks[3]
+    assert tool["text"].startswith("\n<|im_start|>user")
+    assert tool["text"].endswith("<|im_start|>assistant\n")
+    assert blocks[2]["logprobs"] == [-0.5] * 6
+    page = render.page("", {"step": "3"}, 0.5, {}, tokens)
+    assert page.count('<button data-view="tokens">') == 5
+    assert "thinking 2 · final 4" in page
+    rows = re.findall(r'<div class="row \w+ (\w+)">', page)
+    assert rows == ["system", "task", "agent", "tool", "agent"]
+    data = page.split('id="blocks">')[1].split("</script>")[0]
+    assert json.loads(data)[4]["pieces"][-1] == "</script>"
+
+
+def test_the_loop_keeps_every_token_with_what_the_model_wrote():
+    tokenizer = SimpleNamespace(decode=lambda ids: f"<{ids[0]}>")
+    output = SimpleNamespace(
+        prompt_ids=[1, 2],
+        response_ids=[3, 4, 5],
+        response_mask=[1, 0, 1],
+        response_logprobs=[-0.123456, 0.0, -2.0],
+    )
+    assert loop.tokens(tokenizer, output) == {
+        "ids": [1, 2, 3, 4, 5],
+        "pieces": ["<1>", "<2>", "<3>", "<4>", "<5>"],
+        "generated": [0, 0, 1, 0, 1],
+        "logprobs": [None, None, -0.1235, None, -2.0],
+    }
+    output.response_logprobs = None
+    assert loop.tokens(tokenizer, output)["logprobs"] == [None] * 5
+
+
+def test_a_page_shows_an_episode_that_kept_its_tokens():
+    plain = episode("train", 0.0)
+    kept = episode("train", 1.0) | {"tokens": recorded_tokens()}
+    for _ in range(5):
+        page = progress.pages([plain, kept, plain], 7)["pile/episode"]
+        assert '<button data-view="tokens">' in page
 
 
 def test_a_run_whose_log_shows_a_hydra_failure_counts_as_crashed(tmp_path):
@@ -235,8 +310,7 @@ def test_every_preset_composes_with_the_recipe(monkeypatch):
 
 
 def test_an_empty_command_renders_without_crashing():
-    transcript = "<|im_start|>assistant\n<bash></bash><|im_end|>"
-    assert "$ </pre>" in "".join(render.chat(transcript))
+    assert "&lt;bash&gt;<b></b>&lt;/bash&gt;" in render.exact("<bash></bash>")
 
 
 def test_a_turn_runs_one_command_only_at_its_very_end():

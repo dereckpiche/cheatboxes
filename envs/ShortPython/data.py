@@ -171,6 +171,21 @@ def as_function(completion: str) -> tuple[str, str] | None:
     return method.name, text
 
 
+EXAMPLES = re.compile(
+    r"^[ \t]*Example \d+:.*?(?=^[ \t]*Constraints:|\Z)", re.S | re.M
+)
+"""A statement's worked examples: from `Example 1:` to its constraints."""
+
+
+def without_examples(description: str) -> str:
+    """The dataset's statement without its worked examples: the problem,
+    then its constraints and any follow-up, blank lines collapsed.
+    """
+    text = EXAMPLES.sub("", description.replace("\xa0", " "))
+    text = re.sub(r"\n[ \t]*(?:\n[ \t]*)+", "\n\n", text)
+    return text.strip() + "\n"
+
+
 def problems(split: str) -> tuple[Problem, ...]:
     """Every gradable problem of `split` ("train" or "val"), in dataset
     order, with its expected results, read once per process.
@@ -217,7 +232,7 @@ def candidates(split: str) -> tuple[Problem, ...]:
         found.append(
             Problem(
                 row["task_id"],
-                row["problem_description"].replace("\xa0", " ").strip() + "\n",
+                without_examples(row["problem_description"]),
                 name,
                 text,
                 row["difficulty"],
