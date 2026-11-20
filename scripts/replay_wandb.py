@@ -146,6 +146,10 @@ def main():
     online.config.update(config, allow_val_change=True)
     start = online.starting_step
     new = [step for step in sorted(steps) if step >= start]
+    if start > max(steps) + 1:
+        print(f"warning: the online run is at step {start}, past this run's"
+              f" last ({max(steps)}); wandb drops lower steps, so rebuild it"
+              " under a new --id")
     for step in new:
         row = {
             key: value(item, sources[step])
