@@ -9,7 +9,8 @@ fragments instead: it reads each one's history, keeps the latest attempt
 of every step (a resumed chunk redoes the steps since its checkpoint), and
 logs the steps the online run does not have yet, episode pages included.
 Run it again to add the steps logged since; steps it uploaded before stay
-as they were.
+as they were. wandb never reuses a deleted run's id: to rebuild a deleted
+run, give it a new one with --id.
 
     python scripts/replay_wandb.py RUN_DIR [--id ID] [--dry-run]
 
@@ -135,6 +136,7 @@ def main():
         name=run["name"],
         resume="allow",
         config=config,
+        dir=args.run_dir,
     )
     online.config.update(config, allow_val_change=True)
     start = online.starting_step
