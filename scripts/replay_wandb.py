@@ -83,8 +83,11 @@ def fragment(directory: Path) -> tuple[dict, dict[int, dict]]:
         elif kind == "history":
             row = {}
             for item in record.history.item:
-                key = item.key or "/".join(item.nested_key)
-                row[key] = json.loads(item.value_json)
+                *path, last = list(item.nested_key) or [item.key]
+                place = row
+                for key in path:
+                    place = place.setdefault(key, {})
+                place[last] = json.loads(item.value_json)
             if "_step" in row:
                 steps[int(row["_step"])] = row
     return run, steps
@@ -124,7 +127,9 @@ def main():
     config_path = args.run_dir / "run.json"
     config = json.loads(config_path.read_text()) if config_path.exists() else {}
     if args.dry_run:
-        print(f"would log {len(steps)} steps to {args.id or run['id']}")
+        last = steps[max(steps)]
+        print(f"would log {len(steps)} steps to {args.id or run['id']};"
+              f" step {max(steps)}: {sorted(last)}")
         return
 
     import wandb
