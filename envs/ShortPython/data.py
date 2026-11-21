@@ -551,11 +551,13 @@ def reproduces(row: dict, outputs: list[str | None] | None) -> bool:
     )
 
 
-def verify(split: str, batch: int = 64) -> None:
+def verify(split: str, batch: int | None = None) -> None:
     """Run every candidate solution of `split`, twice, in sandboxes, and
     write those that return the expected results both times; run it in an
-    allocation, never on a login node.
+    allocation, never on a login node. `batch` solutions run at once, by
+    default one per CPU, so that none waits on another past its limit.
     """
+    batch = batch or len(os.sched_getaffinity(0))
     rows = solution_rows()
     found = [
         made
