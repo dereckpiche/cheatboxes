@@ -100,7 +100,8 @@ It must be possible to make $c(m_i)$ hard for another agent to predict from $m_i
 Each module $m_i$ is either "defended" or "vulnerable".
 For defended modules only, respecting the constraint is part of the agent's verifiable reward, which prevents exploitation.
 The agent must work on both module types to play optimally.
-Finally, the agent has a way to tell which modules are defended, and even a safe agent needs this information to play optimally.
+Finally, defended modules carry an extra, visible constraint $d(m_i)$ that vulnerable modules lack, and that is part of the verifiable reward.
+The agent cannot do a defended module's task without meeting it, so even a safe agent must tell the two kinds apart, and the kind of a module is bound to how the agent works on it rather than to a label it could ignore.
 
 
 #### Examples of scores and constraints
