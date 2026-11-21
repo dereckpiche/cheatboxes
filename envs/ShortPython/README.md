@@ -73,12 +73,23 @@ a call it cannot answer, or answers differently, is dropped, and so is a
 problem left with no call, or whose reference needs over half a second
 or 4 GB for its calls: 2,161 train and 167 val problems remain, of which
 577 and 47 are Easy.
-Problems are drawn on demand; nothing is generated in advance. The
-files live on Mila, cluv's `data_source`, fetched once on its login node
-with `cluv run mila python -m envs.ShortPython`; the expected results
-are computed in an allocation with `python -m envs.ShortPython expect`.
-cluv copies both to any other cluster a job goes to. The tests skip
-where they are absent.
+The files the agent edits hold other solutions: each problem's Python
+and JavaScript solutions from `greengerong/leetcode` (MIT), which covers
+LeetCode's problems up to about 2,400, joined by slug, so none of the
+later val problems: the environment has a train split only. Each is called
+under its own function's name, its arguments by position; JavaScript gets
+them as JSON, and calls or results JSON cannot carry exactly are dropped.
+`python -m envs.ShortPython verify` runs every solution twice in
+sandboxes and keeps those that return the expected result on every call
+within 2 s: POOL_SIZES. Problems whose results are all one value are left
+out. The kept (problem, language) pairs are in `verified.json`, in the
+repository; each cluster rebuilds the solutions from the public datasets.
+Problems are drawn on demand; nothing is generated in advance. Fetch the
+datasets once on a cluster's login node with `python -m
+envs.ShortPython` (and the sandbox image, Python 3.12 with Node 22, with
+`scripts/prefetch.sh`); the expected results are computed in an
+allocation with `python -m envs.ShortPython expect`. The tests skip
+where the data is absent.
 
 ### Settings
 

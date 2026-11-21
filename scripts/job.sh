@@ -10,10 +10,19 @@ if module is-loaded httpproxy 2>/dev/null \
   module unload httpproxy
   echo "httpproxy cannot reach $wandb_url; unloaded it"
 fi
+ROOTFS_TAR="$SCRATCH/cache/rootfs/python-3.12-node-22.tar"
+if [ "${SANDBOX_RUNTIME:-}" = unshare ] && [ ! -f "$ROOTFS_TAR" ]; then
+  echo "no sandbox image at $ROOTFS_TAR: run scripts/prefetch.sh on this cluster's login node"
+  exit 1
+fi
+if [ "${SANDBOX_RUNTIME:-}" = apptainer ] && [ ! -e "${SANDBOX_IMAGE:-}" ]; then
+  echo "no sandbox image at ${SANDBOX_IMAGE:-}: run scripts/prefetch.sh on this cluster's login node"
+  exit 1
+fi
 if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
   mkdir -p "$SANDBOX_ROOTFS"
-  tar -xf "$SCRATCH/cache/rootfs/python-3.12-node-22.tar" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
+  tar -xf "$ROOTFS_TAR" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
   mkdir -p "$SANDBOX_ROOTFS/work" "$SANDBOX_ROOTFS/.old"
 elif command -v podman >/dev/null; then
   podman system migrate >/dev/null 2>&1 || true
