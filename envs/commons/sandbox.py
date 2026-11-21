@@ -10,7 +10,10 @@ from pathlib import Path
 
 from envs.commons.container import Exec, container
 
-IMAGE = os.environ.get("SANDBOX_IMAGE", "docker.io/library/python:3.12-slim")
+IMAGE = os.environ.get(
+    "SANDBOX_IMAGE", "docker.io/nikolaik/python-nodejs:python3.12-nodejs22-slim"
+)
+"""Python 3.12 and Node 22: ShortPython's files are in both."""
 ROOT = Path(os.environ.get("SANDBOX_ROOT", "/tmp/cheatboxes-sandbox"))
 
 

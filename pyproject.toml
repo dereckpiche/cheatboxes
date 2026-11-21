@@ -95,7 +95,7 @@ UV_OFFLINE = "1"
 HF_HUB_OFFLINE = "1"
 WANDB_MODE = "online"
 SANDBOX_RUNTIME = "apptainer"
-SANDBOX_IMAGE = "$SCRATCH/cache/apptainer/python-3.12-slim.sif"
+SANDBOX_IMAGE = "$SCRATCH/cache/apptainer/python-3.12-node-22.sif"
 
 [tool.cluv.sbatch_args]
 nodes = 1

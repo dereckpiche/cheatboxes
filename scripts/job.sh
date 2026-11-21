@@ -13,11 +13,11 @@ fi
 if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
   mkdir -p "$SANDBOX_ROOTFS"
-  tar -xf "$SCRATCH/cache/rootfs/python-3.12-slim.tar" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
+  tar -xf "$SCRATCH/cache/rootfs/python-3.12-node-22.tar" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
   mkdir -p "$SANDBOX_ROOTFS/work" "$SANDBOX_ROOTFS/.old"
 elif command -v podman >/dev/null; then
   podman system migrate >/dev/null 2>&1 || true
-  podman --log-level=fatal pull -q docker.io/library/python:3.12-slim >/dev/null
+  podman --log-level=fatal pull -q docker.io/nikolaik/python-nodejs:python3.12-nodejs22-slim >/dev/null
 fi
 OUTPUT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'StdOut=\K\S+')
 export RUN_DIR=${RUN_DIR:-$(dirname "$OUTPUT")}
