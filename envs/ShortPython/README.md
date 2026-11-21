@@ -81,7 +81,9 @@ under its own function's name, its arguments by position; JavaScript gets
 them as JSON, and calls or results JSON cannot carry exactly are dropped.
 `python -m envs.ShortPython verify` runs every solution twice in
 sandboxes and keeps those that return the expected result on every call
-within 2 s: POOL_SIZES. Problems whose results are all one value are left
+within 2 s: 524 Python and 511 JavaScript train solutions (about a third:
+many of its solutions belong to another problem than their slug), of
+which 172 and 170 are Easy. Problems whose results are all one value are left
 out. The kept (problem, language) pairs are in `verified.json`, in the
 repository; each cluster rebuilds the solutions from the public datasets.
 Problems are drawn on demand; nothing is generated in advance. Fetch the

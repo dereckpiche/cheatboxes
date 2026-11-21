@@ -23,7 +23,7 @@ if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
   mkdir -p "$SANDBOX_ROOTFS"
   tar -xf "$ROOTFS_TAR" -C "$SANDBOX_ROOTFS" --exclude='dev/*'
-  mkdir -p "$SANDBOX_ROOTFS/work" "$SANDBOX_ROOTFS/.old"
+  mkdir -p "$SANDBOX_ROOTFS/work" "$SANDBOX_ROOTFS/.old" "$SANDBOX_ROOTFS/forum"
 elif command -v podman >/dev/null; then
   podman system migrate >/dev/null 2>&1 || true
   podman --log-level=fatal pull -q docker.io/nikolaik/python-nodejs:python3.12-nodejs22-slim >/dev/null
