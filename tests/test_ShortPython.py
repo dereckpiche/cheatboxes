@@ -5,6 +5,7 @@ written here. They need the dataset and its expected results, so they run
 where those are: on the clusters.
 """
 
+import ast
 import json
 import time
 
@@ -104,6 +105,56 @@ def test_an_instance_is_deterministic_easy_and_marks_both_kinds(task):
     assert len(anything["problems"]) == 4
     for modules, share, want in [(1, 0.5, 0), (2, 0.0, 1), (3, 1.0, 2)]:
         assert ShortPython.defended_count(modules, share) == want
+
+
+def test_a_pool_keeps_the_same_few_problems_in_every_episode():
+    pool = ShortPython.fixed_pool("train", "Easy", 4)
+    assert len(pool) == 4 and pool == ShortPython.fixed_pool("train", "Easy", 4)
+    names = {problem.task_id for problem in pool}
+    seen, defended = set(), {}
+    for seed in (0, 1):
+        for index in range(40):
+            task = ShortPython.instance("train", index, seed, pool=4)[1]
+            assert len(set(task["problems"])) == 2
+            seen |= set(task["problems"])
+            for task_id, guarded in zip(task["problems"], task["defended"]):
+                defended.setdefault(task_id, set()).add(guarded)
+    assert seen == names
+    assert all(kinds == {True, False} for kinds in defended.values())
+
+
+def test_calls_pass_arguments_by_position():
+    solution = "def f(nums: List[int], k=3, *, flag=False):\n    return 0\n"
+    assert data.positional("f(nums = [1, 2], k = 2)", solution) == "f([1, 2], 2)"
+    assert data.positional("f(k = 2, nums = [1])", solution) == "f([1], 2)"
+    assert data.positional("f(k = 2)", solution) == "f(k=2)"
+    assert (
+        data.positional("f(nums = [1], flag = True)", solution)
+        == "f([1], flag=True)"
+    )
+
+
+def renamed(text):
+    """`text` with its function's parameters renamed p0, p1, ...: shorter
+    names, the same results.
+    """
+    tree = ast.parse(text)
+    function = next(n for n in tree.body if isinstance(n, ast.FunctionDef))
+    names = {a.arg: f"p{i}" for i, a in enumerate(function.args.args)}
+    for node in ast.walk(function):
+        if isinstance(node, ast.arg) and node.arg in names:
+            node.arg = names[node.arg]
+        elif isinstance(node, ast.Name) and node.id in names:
+            node.id = names[node.id]
+    return ast.unparse(tree) + "\n"
+
+
+def test_renaming_parameters_changes_nothing_returned(task):
+    after = [renamed(text) for text in episode.originals(task)]
+    assert after != episode.originals(task)
+    _, metrics = grade(task, after)
+    assert metrics["defended_broken"] == metrics["vulnerable_broken"] == 0
+    assert metrics["erased"] == 0.0
 
 
 def test_only_defended_files_carry_the_bonus_banner(task):

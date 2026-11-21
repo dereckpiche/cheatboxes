@@ -87,6 +87,9 @@ venv = ".venv"
 job_script_path = "scripts/job.sh"
 results_path = "$SCRATCH/logs/cheatboxes"
 results_symlink = "logs"
+# This branch's own checkout on each cluster, so that submitting it never
+# switches the checkout a run of another branch restarts from.
+project_dir = "$HOME/Documents/cheatboxes-small"
 data_source = "mila:$SCRATCH/datasets/cheatboxes"
 datasets_path = "$SCRATCH/datasets/cheatboxes"
 
@@ -125,6 +128,8 @@ sbatch_args = { account = "rrg-bengioy-ad", gpus-per-node = 1 }
 env = { WANDB_MODE = "offline" }
 sbatch_args = { account = "aip-courvill", gpus = "h100:4", cpus-per-gpu = 12, mem-per-gpu = "120G" }
 
-[tool.cluv.clusters.killarney]
-project_dir = "$SCRATCH/cheatboxes"  # jobs may not be submitted from /home
-sbatch_args = { account = "aip-courvill", gpus = "l40s:1", cpus-per-gpu = 16, mem-per-gpu = "125G" }
+# killarney is left out: it has no $SCRATCH, no apptainer and no copy of the
+# datasets, so a job that started there could not run.
+# [tool.cluv.clusters.killarney]
+# project_dir = "$SCRATCH/cheatboxes"  # jobs may not be submitted from /home
+# sbatch_args = { account = "aip-courvill", gpus = "l40s:1", cpus-per-gpu = 16, mem-per-gpu = "125G" }

@@ -43,6 +43,24 @@ def defended_count(modules: int, defended: float) -> int:
     return min(max(count, 1), modules - 1) if modules > 1 else count
 
 
+def fixed_pool(
+    split: str, difficulty: str | None, size: int | None
+) -> list:
+    """The problems of `split` and `difficulty` (None for any) episodes draw
+    from: all of them, or with `size` the first `size` of one fixed shuffle,
+    the same whatever the episode's seed or index.
+    """
+    found = [
+        problem
+        for problem in problems(split)
+        if difficulty is None or problem.difficulty == difficulty
+    ]
+    if size is None:
+        return found
+    random.Random("ShortPython-pool").shuffle(found)
+    return found[:size]
+
+
 def instance(
     split: str,
     index: int,
@@ -53,17 +71,15 @@ def instance(
     budget: int = 3000,
     turns: int = 16,
     difficulty: str | None = "Easy",
+    pool: int | None = None,
 ) -> tuple[list[dict], dict]:
     """Episode `index` of the seed: `modules` distinct problems of `split`
     and `difficulty` (None for any), `defended` of them (as a share)
-    defended, defended savings weighted `bonus`.
+    defended, defended savings weighted `bonus`. With `pool`, the problems
+    come from only that many, the same in every episode (`fixed_pool`).
     """
     rng = random.Random(f"ShortPython-{seed}-{split}-{index}")
-    pool = [
-        problem
-        for problem in problems(split)
-        if difficulty is None or problem.difficulty == difficulty
-    ]
+    pool = fixed_pool(split, difficulty, pool)
     chosen = rng.sample(range(len(pool)), modules)
     guarded = set(rng.sample(range(modules), defended_count(modules, defended)))
     task = {

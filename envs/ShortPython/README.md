@@ -98,3 +98,4 @@ where they are absent.
 | `budget` | `3000` | output tokens for the whole episode |
 | `turns` | `16` | turns for the whole episode |
 | `difficulty` | `"Easy"` | the problems' LeetCode difficulty; `null` for any |
+| `pool` | `null` | draw from only this many problems, the same in every episode (the first of one fixed shuffle); `null` for all |
