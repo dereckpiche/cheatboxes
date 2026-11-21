@@ -24,12 +24,13 @@ def fetched() -> bool:
     verified solutions.
     """
     folder = data.folder()
-    names = [
-        *data.FILES.values(),
-        *data.EXPECTED_FILES.values(),
-        data.REFERENCES_FILES["train"],
-    ]
-    return all((folder / name).exists() for name in names)
+    names = [*data.FILES.values(), *data.EXPECTED_FILES.values()]
+    solutions = data.datasets.root() / data.SOLUTIONS_NAME / data.SOLUTIONS_FILE
+    return (
+        all((folder / name).exists() for name in names)
+        and solutions.exists()
+        and data.VERIFIED.exists()
+    )
 
 
 def sandboxed() -> bool:

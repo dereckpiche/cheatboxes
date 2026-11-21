@@ -23,8 +23,8 @@ The files the agent edits hold other references: each problem's Python
 and JavaScript solutions from `greengerong/leetcode` (MIT), which has
 both for the problems it shares with LeetCodeDataset, joined by slug. Each
 is called under its own function's name. `verify` keeps a language's
-solution for a problem only if it returns the expected result on every
-call, run in sandboxes (node is in the image, not on the host); for
+solution for a problem (in VERIFIED, in the repository) only if it
+returns the expected result on every call, run in sandboxes (node is in the image, not on the host); for
 JavaScript, the calls and results JSON cannot carry exactly (ints past
 2**53, inf, nan, sets, dicts) are dropped first. A problem whose expected
 results are all one value, which a stub can return, is left out.
@@ -71,12 +71,10 @@ EXPECTED_FILES = {
     "val": "LeetCodeDataset-test-expected.jsonl",
 }
 """Per problem, the calls kept and the reference's `repr` on each."""
-REFERENCES_FILES = {
-    "train": "LeetCodeDataset-train-references.jsonl",
-    "val": "LeetCodeDataset-test-references.jsonl",
-}
-"""Per problem and language, the verified solution, its function's name,
-and the calls it is graded on with the results each must return."""
+VERIFIED = Path(__file__).with_name("verified.json")
+"""Per split and language, the problems whose solution `verify` found to
+return the expected result on every call: kept in the repository, so a
+cluster needs only the public datasets to rebuild them."""
 SOLUTIONS = "greengerong/leetcode"
 SOLUTIONS_NAME = "greengerong-leetcode"
 SOLUTIONS_FILE = "leetcode-train.jsonl"
@@ -259,8 +257,7 @@ def read(split: str) -> tuple[Problem, ...]:
     solutions, if they have been verified.
     """
     expected = load_expected(split)
-    verified = load_references(split)
-    return tuple(
+    found = tuple(
         replace(
             problem,
             calls=tuple(
@@ -268,11 +265,40 @@ def read(split: str) -> tuple[Problem, ...]:
                 for call in expected[problem.task_id]["calls"]
             ),
             expected=tuple(expected[problem.task_id]["expected"]),
-            references=verified.get(problem.task_id, ()),
         )
         for problem in candidates(split)
         if problem.task_id in expected
     )
+    verified = load_verified().get(split, {})
+    if not any(verified.values()):
+        return found
+    rows = solution_rows()
+    return tuple(
+        replace(problem, references=references(problem, rows, verified))
+        for problem in found
+    )
+
+
+def references(
+    problem: Problem, rows: dict[str, dict], verified: dict[str, list[str]]
+) -> tuple[Reference, ...]:
+    """`problem`'s verified solutions, rebuilt from greengerong's rows."""
+    found = []
+    for language in LANGUAGES:
+        if problem.task_id not in set(verified.get(language, ())):
+            continue
+        made = candidate(problem, rows[problem.task_id], language)
+        if made:
+            found.append(
+                Reference(
+                    language,
+                    made["name"],
+                    made["solution"],
+                    tuple(made["calls"]),
+                    tuple(made["expected"]),
+                )
+            )
+    return tuple(found)
 
 
 @lru_cache(maxsize=None)
@@ -350,28 +376,12 @@ def candidates(split: str) -> tuple[Problem, ...]:
     return tuple(found)
 
 
-def load_references(split: str) -> dict[str, tuple[Reference, ...]]:
-    """The verified solutions of `split` by task id; none before `verify`
+@lru_cache(maxsize=None)
+def load_verified() -> dict[str, dict[str, list[str]]]:
+    """VERIFIED's problems by split and language; none before `verify`
     has run.
     """
-    path = folder() / REFERENCES_FILES[split]
-    if not path.exists():
-        return {}
-    found: dict[str, list[Reference]] = {}
-    with open(path) as lines:
-        for line in lines:
-            if line.strip():
-                row = json.loads(line)
-                found.setdefault(row["task_id"], []).append(
-                    Reference(
-                        row["language"],
-                        row["name"],
-                        row["solution"],
-                        tuple(row["calls"]),
-                        tuple(row["expected"]),
-                    )
-                )
-    return {task_id: tuple(found[task_id]) for task_id in found}
+    return json.loads(VERIFIED.read_text()) if VERIFIED.exists() else {}
 
 
 def load_expected(split: str) -> dict[str, dict]:
@@ -553,7 +563,8 @@ def reproduces(row: dict, outputs: list[str | None] | None) -> bool:
 
 def verify(split: str, batch: int | None = None) -> None:
     """Run every candidate solution of `split`, twice, in sandboxes, and
-    write those that return the expected results both times; run it in an
+    record in VERIFIED those that return the expected results both times;
+    run it in an
     allocation, never on a login node. `batch` solutions run at once, by
     default one per CPU, so that none waits on another past its limit.
     """
@@ -580,9 +591,16 @@ def verify(split: str, batch: int | None = None) -> None:
             for row, a, b in zip(chunk, first, second)
             if reproduces(row, a) and reproduces(row, b)
         ]
-    with open(folder() / REFERENCES_FILES[split], "w") as file:
-        for row in kept:
-            file.write(json.dumps(row) + "\n")
+    verified = load_verified() | {
+        split: {
+            language: sorted(
+                r["task_id"] for r in kept if r["language"] == language
+            )
+            for language in LANGUAGES
+        }
+    }
+    VERIFIED.write_text(json.dumps(verified, indent=1) + "\n")
+    load_verified.cache_clear()
     for language in LANGUAGES:
         tried = sum(r["language"] == language for r in found)
         good = sum(r["language"] == language for r in kept)
