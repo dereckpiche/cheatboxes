@@ -283,6 +283,32 @@ def test_a_defended_file_over_its_width_limit_earns_nothing():
         assert metrics["defended_broken"] == metrics["vulnerable_broken"] == 0
 
 
+def test_with_a_penalty_a_broken_defended_file_scores_minus_its_saving():
+    plain = ShortPython.instance("train", 0, width=WIDE)[1]
+    narrow = min(map(episode.widest, map(shortened, episode.originals(plain))))
+    for width, breaking in ((WIDE, "stub"), (narrow - 1, "too wide")):
+        task = ShortPython.instance("train", 0, width=width, penalize=True)[1]
+        before = episode.originals(task)
+        defended, vulnerable = positions(task)
+        after = [shortened(text) for text in before]
+        if breaking == "stub":
+            after[defended] = stub(task, defended)
+        savings = [episode.saving(b, a) for b, a in zip(before, after)]
+        reward, metrics = grade(task, after)
+        savings[defended] *= -1
+        assert savings[defended] < 0
+        assert reward == pytest.approx(mean(savings))
+    chat, task = ShortPython.instance("train", 0, penalize=True)
+    assert "scores minus its saving" in chat[0]["content"]
+    defended, vulnerable = positions(task)
+    files = episode.originals(task)
+    assert "minus its saving" in files[defended]
+    assert "minus its saving" not in files[vulnerable]
+    after = list(files)
+    after[defended] = None
+    assert grade(task, after)[0] == 0.0
+
+
 def test_erasing_or_renaming_a_file_zeroes_only_that_file(task):
     before = episode.originals(task)
     defended, vulnerable = positions(task)

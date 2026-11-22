@@ -77,6 +77,7 @@ def instance(
     modules: int = 2,
     defended: float = 0.5,
     width: int = 40,
+    penalize: bool = False,
     budget: int = 3000,
     turns: int = 16,
     difficulty: str | None = "Easy",
@@ -85,7 +86,9 @@ def instance(
 ) -> tuple[list[dict], dict]:
     """Episode `index` of the seed: `modules` distinct problems of `split`
     and `difficulty` (None for any), `defended` of them (as a share)
-    defended, their code lines limited to `width` characters. With `pool`,
+    defended, their code lines limited to `width` characters; with
+    `penalize`, a defended file that fails a hidden test or its width limit
+    scores minus its saving instead of nothing. With `pool`,
     the problems come from only that many, those closest to `length` code
     characters, the same in every episode (`fixed_pool`).
     """
@@ -98,6 +101,7 @@ def instance(
         "problems": [pool[i].task_id for i in chosen],
         "defended": [i in guarded for i in range(modules)],
         "width": width,
+        "penalize": penalize,
         "budget": budget,
         "turns": turns,
     }
