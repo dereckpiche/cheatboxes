@@ -156,7 +156,8 @@ def test_configs_become_flat_columns_of_one_type_each():
 
 def test_a_run_writes_its_numbers_pages_log_and_record_locally(tmp_path):
     """Offline (no publishing), in a fresh process: trackio reads
-    TRACKIO_DIR once, when imported."""
+    TRACKIO_DIR once, when imported. The numbers land in the database even
+    where trackio would write fragments instead (a network filesystem)."""
     import subprocess
     import sys
 
@@ -178,7 +179,7 @@ print(rows, len(list((part / "trackio" / "media").rglob("*.html"))))
         [sys.executable, "-c", script],
         capture_output=True,
         text=True,
-        env={**os.environ, "RESULTS_OFFLINE": "1"},
+        env={**os.environ, "RESULTS_OFFLINE": "1", "TRACKIO_STORAGE_MODE": "jsonl"},
     )
     assert found.returncode == 0, found.stderr
     assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] 1"]

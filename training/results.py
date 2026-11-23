@@ -81,6 +81,9 @@ class Results:
         self.dir = Path(run_dir) / "results" / self.part
         self.dir.mkdir(parents=True, exist_ok=True)
         os.environ["TRACKIO_DIR"] = str(self.dir / "trackio")
+        # On a network filesystem (scratch) trackio would write JSONL fragments
+        # for a server to import; this job is its database's only writer.
+        os.environ["TRACKIO_STORAGE_MODE"] = "sqlite"
         import trackio  # reads TRACKIO_DIR when imported
 
         self.trackio = trackio
@@ -195,6 +198,18 @@ def columns(configs: dict[str, dict]) -> dict[str, dict]:
     }
 
 
+def has_metrics(database: Path) -> bool:
+    """Whether a trackio database exists and has its metrics table (opened
+    read-only: sqlite3 would create a missing file)."""
+    if not database.exists():
+        return False
+    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as db:
+        found = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'metrics'"
+        )
+        return found.fetchone() is not None
+
+
 def merge(sources: list[Path], project: str) -> None:
     """Write every source's runs into the trackio project `project` (in
     TRACKIO_DIR). A step logged by several sources (a step redone after a
@@ -204,7 +219,7 @@ def merge(sources: list[Path], project: str) -> None:
 
     rows: dict[tuple[str, int], dict[int, list[tuple[str, str]]]] = {}
     configs: dict[str, tuple[str, dict]] = {}
-    for number, source in enumerate(sources):
+    for number, source in enumerate(filter(has_metrics, sources)):
         with sqlite3.connect(source) as db:
             for run, step, stamp, metrics in db.execute(
                 "SELECT run_name, step, timestamp, metrics FROM metrics ORDER BY id"
@@ -244,14 +259,14 @@ def publish(part: Path) -> None:
     uploaded_file = part / "uploaded.json"
     uploaded = set(json.loads(uploaded_file.read_text())) if uploaded_file.exists() else set()
     with tempfile.TemporaryDirectory() as tmp:
-        snapshot = Path(tmp) / "part.db"  # a consistent copy while trackio writes
-        with sqlite3.connect(trackio_dir / f"{PROJECT}.db") as db:
-            with sqlite3.connect(snapshot) as copy:
-                db.backup(copy)
-        add = [
-            (str(snapshot), f"sources/{run}/{name}.db"),
-            (str(part / "job.json"), f"runs/{run}/{name}.json"),
-        ]
+        add = [(str(part / "job.json"), f"runs/{run}/{name}.json")]
+        database = trackio_dir / f"{PROJECT}.db"
+        if has_metrics(database):  # not before trackio's first write
+            snapshot = Path(tmp) / "part.db"  # a consistent copy while trackio writes
+            with sqlite3.connect(database) as db:
+                with sqlite3.connect(snapshot) as copy:
+                    db.backup(copy)
+            add.append((str(snapshot), f"sources/{run}/{name}.db"))
         if (part / "log.txt").exists():
             add.append((str(part / "log.txt"), f"runs/{run}/{name}.log"))
         media = trackio_dir / "media" / PROJECT
