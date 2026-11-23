@@ -85,6 +85,7 @@ venvPath = "."
 venv = ".venv"
 
 [tool.cluv]
+project_dir = "$HOME/Documents/cheatboxes-trackio"  # while testing: leaves the live runs' checkout alone
 job_script_path = "scripts/job.sh"
 results_path = "$SCRATCH/logs/cheatboxes"
 results_symlink = "logs"
