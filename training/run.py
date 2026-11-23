@@ -240,6 +240,13 @@ def main() -> None:
         "cluster": os.environ.get("CC_CLUSTER")
         or os.environ.get("SLURM_CLUSTER_NAME"),
         "host": socket.gethostname(),
+        "command": [
+            *(f"{name}={os.environ[name]}" for name in ("EXP", "ENV", "MODEL")),
+            "python",
+            "-m",
+            "training.run",
+            *overrides,
+        ],
         **checkout(),
     }
     results = Results(run_dir, os.environ["EXP"], config, job)

@@ -74,7 +74,8 @@ class Results:
             run: The run's name on the dashboard; a resumed run keeps it.
             config: The run's whole config.
             job: Where this job runs: job (its id, the part's name),
-                cluster, host, commit, commit_url, dirty.
+                cluster, host, commit, commit_url, dirty, and command (by
+                default, this process's).
         """
         self.part = str(job.get("job") or datetime.now().strftime("%Y%m%d-%H%M%S"))
         self.dir = Path(run_dir) / "results" / self.part
@@ -93,8 +94,8 @@ class Results:
             auto_log_cpu=False,
             capture_console=False,
         )
-        record = {"run": run, "part": self.part, "started": now(), **job}
-        record |= {"command": sys.argv, "config": config}
+        record = {"run": run, "part": self.part, "started": now(), "command": sys.argv}
+        record |= {**job, "config": config}
         (self.dir / "job.json").write_text(json.dumps(record, default=str) + "\n")
         self.log_file = open(self.dir / "log.txt", "a", buffering=1)
         self.publisher: subprocess.Popen | None = None
@@ -127,6 +128,7 @@ class Results:
             return
         self.settle()
         env = {k: v for k, v in os.environ.items() if k != "HF_HUB_OFFLINE"}
+        env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         with open(self.dir / "publish.log", "a") as output:
             self.publisher = subprocess.Popen(
                 [sys.executable, "-m", __name__, str(self.dir)],
