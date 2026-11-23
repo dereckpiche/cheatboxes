@@ -1,10 +1,11 @@
 import json
+import os
 import re
 from types import SimpleNamespace
 
 from omegaconf import OmegaConf
 
-from training import instances, loop, progress, render
+from training import instances, loop, progress, render, results
 from envs import SafeSpeedups
 
 STEP = (
@@ -110,16 +111,12 @@ def test_episode_log_hands_out_only_new_records(tmp_path):
     assert log.drain() == []
 
 
-def test_follow_logs_a_whole_run_of_verl_output(tmp_path, monkeypatch, capsys):
-    logged, kept = [], []
-    run = SimpleNamespace(
-        url="u",
-        id="run",
-        log=lambda data, step=None: logged.append((step, data)),
-        log_artifact=kept.append,
-        finish=lambda: None,
+def test_follow_logs_a_whole_run_of_verl_output(tmp_path):
+    said, logged = [], []
+    results = SimpleNamespace(
+        say=said.append,
+        log=lambda numbers, pages, step: logged.append((step, numbers, pages)),
     )
-    monkeypatch.setattr(progress.wandb, "init", lambda **kwargs: run)
     episodes = tmp_path / "episodes.jsonl"
     stream = ["Training from scratch\n", "(TaskRunner pid=1) noise\n"]
 
@@ -135,16 +132,100 @@ def test_follow_logs_a_whole_run_of_verl_output(tmp_path, monkeypatch, capsys):
 
     raw = tmp_path / "verl.log"
     with open(raw, "w") as file:
-        progress.follow(lines(), file, str(episodes))
-    assert [step for step, _ in logged] == [0, 1, None]
-    table = logged[-1][1]["episodes"]
-    assert [row[0] for row in table.data] == [0, 0, 1, 1]
-    assert "hacked" in table.columns and kept[0].type == "episodes"
-    first = logged[0][1]
-    assert first["pile_valid/reward_task"] == 1.0
-    assert isinstance(first["pile/episode"], progress.wandb.Html)
-    assert "Training from scratch" in capsys.readouterr().out
+        progress.follow(lines(), file, str(episodes), results)
+    assert [step for step, _, _ in logged] == [0, 1]
+    _, numbers, pages = logged[0]
+    assert numbers["pile_valid/reward_task"] == 1.0
+    assert set(pages) == {"pile/episode", "pile_valid/episode"}
+    assert said[0] == "Training from scratch"
+    assert not any("noise" in line for line in said)
+    assert [line[:9] for line in said[1:]].count("step    0") >= 2
     assert len(raw.read_text().splitlines()) == 4
+
+
+def test_configs_become_flat_columns_of_one_type_each():
+    configs = {
+        "a": {"model": {"path": "x", "lora": {"rank": 8}}, "tags": ["t"], "kw": {}},
+        "b": {"model": "y", "lr": 1e-6},
+    }
+    assert results.columns(configs) == {
+        "a": {"model.path": "x", "model.lora.rank": 8, "tags": '["t"]', "kw": "{}"},
+        "b": {"model": "y", "lr": 1e-6},
+    }
+
+
+def test_a_run_writes_its_numbers_pages_log_and_record_locally(tmp_path):
+    """Offline (no publishing), in a fresh process: trackio reads
+    TRACKIO_DIR once, when imported. The numbers land in the database even
+    where trackio would write fragments instead (a network filesystem)."""
+    import subprocess
+    import sys
+
+    script = f"""
+import json, sqlite3
+from pathlib import Path
+from training.results import Results
+results = Results(Path({str(tmp_path)!r}), "smoke", {{"lr": 1e-6}}, {{"job": "7"}})
+results.say("step    1  hello")
+results.log({{"pile/reward": 0.5}}, {{"pile/episode": "<p>page</p>"}}, 1)
+results.finish()
+part = Path({str(tmp_path)!r}) / "results" / "7"
+print(json.loads((part / "job.json").read_text())["config"])
+print((part / "log.txt").read_text().count("hello"))
+rows = sqlite3.connect(part / "trackio" / "cheatboxes.db").execute("SELECT step FROM metrics").fetchall()
+print(rows, len(list((part / "trackio" / "media").rglob("*.html"))))
+"""
+    found = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "RESULTS_OFFLINE": "1", "TRACKIO_STORAGE_MODE": "jsonl"},
+    )
+    assert found.returncode == 0, found.stderr
+    assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] 1"]
+
+
+def test_merging_keeps_the_last_job_of_a_redone_step(tmp_path):
+    """Two jobs of one run, the second redoing step 2; each in a fresh
+    process, as trackio reads TRACKIO_DIR once."""
+    import subprocess
+    import sys
+
+    def job(number: int, logged: dict) -> None:
+        script = f"""
+from pathlib import Path
+from training.results import Results
+results = Results(Path({str(tmp_path)!r}), "smoke", {{}}, {{"job": "{number}"}})
+for step, numbers in {logged!r}.items():
+    for row in numbers:
+        results.log(row, {{}}, step)
+results.finish()
+"""
+        env = {**os.environ, "RESULTS_OFFLINE": "1"}
+        done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+
+    job(1, {1: [{"resume/attempt": 1}, {"reward": 0.1}], 2: [{"reward": 0.2}]})
+    job(2, {2: [{"reward": 0.25}], 3: [{"reward": 0.3}]})
+    parts = sorted((tmp_path / "results").glob("*/trackio/cheatboxes.db"))
+    script = f"""
+import sqlite3
+from pathlib import Path
+from training.results import merge
+merge([Path(p) for p in {[str(p) for p in parts]!r}], "merged")
+print(sqlite3.connect(Path({str(tmp_path)!r}) / "merged" / "merged.db").execute(
+    "SELECT step, metrics FROM metrics ORDER BY id").fetchall())
+"""
+    env = {**os.environ, "TRACKIO_DIR": str(tmp_path / "merged")}
+    done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    rows = [(step, json.loads(metrics)) for step, metrics in eval(done.stdout.splitlines()[-1])]
+    assert rows == [
+        (1, {"resume/attempt": 1}),
+        (1, {"reward": 0.1}),
+        (2, {"reward": 0.25}),
+        (3, {"reward": 0.3}),
+    ]
 
 
 def test_the_page_ends_with_the_grade():

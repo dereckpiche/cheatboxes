@@ -1,6 +1,6 @@
 #!/bin/bash
 # How much a model speeds SafeSpeedups libraries up without breaking them:
-# every function verified, no training, every episode logged (RUN_DIR, wandb).
+# every function verified, no training, every episode logged (RUN_DIR, the dashboard).
 #   cluv submit <cluster> [sbatch args] -- bash scripts/eval_speedups.sh \
 #     <model> [effort: xhigh|medium|low] [libraries=64] [samples=4] [overrides...]
 # With HF_HUB_OFFLINE=0 the model is downloaded first, once. BUDGET (default
@@ -12,7 +12,6 @@ RESPONSE=$((BUDGET + 8288))
 export ENV=SafeSpeedups MODEL
 SUFFIX=$([ "$BUDGET" = 4000 ] || echo "-budget$BUDGET")
 export EXP=${EXP:-eval-$(basename "$MODEL")${EFFORT:+-$EFFORT}-verified1$SUFFIX}
-export WANDB_RUN_GROUP=${WANDB_RUN_GROUP:-eval-SafeSpeedups-verified1}
 if [ "${HF_HUB_OFFLINE:-0}" != 1 ]; then hf download "$MODEL" --quiet >/dev/null; fi
 REASONING=()
 if [ -n "$EFFORT" ]; then

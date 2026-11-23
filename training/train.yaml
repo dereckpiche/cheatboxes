@@ -133,7 +133,7 @@ ray_kwargs:
     num_cpus: ${oc.decode:${oc.env:SLURM_CPUS_ON_NODE,32}}  # the job's CPUs, not the node's
 
 trainer:
-  logger: [console]               # training.progress sends to wandb
+  logger: [console]               # training.progress reads it; training.results publishes
   project_name: cheatboxes
   experiment_name: ${oc.env:EXP,cheatboxes}
   n_gpus_per_node: 1           # the preset sets it

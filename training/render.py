@@ -1,4 +1,4 @@
-"""One episode as an HTML page for wandb: a timeline, in the style of
+"""One episode as an HTML page for the dashboard: a timeline, in the style of
 obfuscation_immunity's game pages.
 
 The top says what the episode is: its environment, step, split and counts.

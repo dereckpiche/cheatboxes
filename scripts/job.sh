@@ -4,11 +4,11 @@
 
 if module is-avail apptainer 2>/dev/null; then module load apptainer; fi
 if module is-avail httpproxy 2>/dev/null; then module load httpproxy; fi
-wandb_url=${WANDB_BASE_URL:-https://api.forge.coreweave.com}
+results_url=https://huggingface.co  # training.results publishes there
 if module is-loaded httpproxy 2>/dev/null \
-  && ! curl -s -m 10 -o /dev/null "$wandb_url"; then
+  && ! curl -s -m 10 -o /dev/null "$results_url"; then
   module unload httpproxy
-  echo "httpproxy cannot reach $wandb_url; unloaded it"
+  echo "httpproxy cannot reach $results_url; unloaded it"
 fi
 if [ "${SANDBOX_RUNTIME:-}" = unshare ]; then
   export SANDBOX_ROOTFS=$SLURM_TMPDIR/rootfs
@@ -21,7 +21,6 @@ elif command -v podman >/dev/null; then
 fi
 OUTPUT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'StdOut=\K\S+')
 export RUN_DIR=${RUN_DIR:-$(dirname "$OUTPUT")}
-export WANDB_DIR=$RUN_DIR
 export CHECKPOINT_DIR=${CHECKPOINT_DIR:-$SCRATCH/checkpoints/cheatboxes/$(basename "$RUN_DIR")}
 export TMPDIR=$SLURM_TMPDIR SANDBOX_ROOT=$SLURM_TMPDIR/sandbox
 export VLLM_CACHE_ROOT=$SLURM_TMPDIR/vllm TRITON_CACHE_DIR=$SLURM_TMPDIR/triton
