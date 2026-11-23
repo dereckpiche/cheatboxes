@@ -1,7 +1,7 @@
 # @package _global_
 # 4 L40S (48 GB), a 4B model: the 1-L40S recipe, one replica per GPU. vLLM
 # gets 40% of each GPU; the actor's weights and Adam wait in CPU memory;
-# logits are processed in chunks and in packs of one sequence at most; the
+# logits are processed in chunks; the
 # frozen base is bf16 (PEFT keeps the LoRA adapters in fp32). Run on Mila
 # 2026-11-18: ~190 s a step on ShortPython.
 
@@ -12,15 +12,12 @@ actor_rollout_ref:
   actor:
     entropy_from_logits_with_chunking: true
     entropy_checkpointing: true
-    ppo_max_token_len_per_gpu: 7168
     fsdp_config:
       model_dtype: bf16
       param_offload: true
       optimizer_offload: true
   ref:
-    log_prob_max_token_len_per_gpu: 7168
     fsdp_config:
       model_dtype: bf16
   rollout:
     gpu_memory_utilization: 0.4
-    log_prob_max_token_len_per_gpu: 7168

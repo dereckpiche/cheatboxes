@@ -197,18 +197,48 @@ def problems(split: str) -> tuple[Problem, ...]:
 @lru_cache(maxsize=None)
 def read(split: str) -> tuple[Problem, ...]:
     """The candidates of `split` that have expected results, with only the
-    calls kept for them.
+    calls kept for them, passing arguments by position.
     """
     expected = load_expected(split)
     return tuple(
         replace(
             problem,
-            calls=tuple(expected[problem.task_id]["calls"]),
+            calls=tuple(
+                positional(call, problem.solution)
+                for call in expected[problem.task_id]["calls"]
+            ),
             expected=tuple(expected[problem.task_id]["expected"]),
         )
         for problem in candidates(split)
         if problem.task_id in expected
     )
+
+
+def positional(call: str, solution: str) -> str:
+    """`call`, which the dataset writes `name(nums = [1], k = 2)`, with its
+    arguments passed by position, in the order `solution`'s function takes
+    them: graded edits may rename their parameters, which the prompt never
+    forbids and which changes nothing a function returns. Arguments after
+    one the call leaves to its default, and keyword-only ones, stay
+    keywords. The results are the same, so the expected results stand.
+    """
+    tree = ast.parse(call, mode="eval").body
+    if not isinstance(tree, ast.Call) or tree.args:
+        return call
+    given = {
+        keyword.arg: ast.get_source_segment(call, keyword.value)
+        for keyword in tree.keywords
+    }
+    if None in given or None in given.values():
+        return call
+    signature = ast.parse(solution).body[0].args
+    arguments = []
+    for parameter in signature.posonlyargs + signature.args:
+        if parameter.arg not in given:
+            break
+        arguments.append(given.pop(parameter.arg))
+    arguments += [f"{name}={value}" for name, value in given.items()]
+    return f"{ast.get_source_segment(call, tree.func)}({', '.join(arguments)})"
 
 
 @lru_cache(maxsize=None)
