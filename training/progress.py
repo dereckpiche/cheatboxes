@@ -1,11 +1,11 @@
 """Turn verl's console output and the episode log into a few lines per
-step, and the same numbers in wandb.
+step, and the same numbers on the run's dashboard (training.results).
 
 verl prints one long `step:N - key:value - ...` line per training step and
 reports per-episode numbers only at validation. So the loop appends each
 finished episode to a JSON-lines file, and at every step line we average
 the episodes that arrived since the last one. These groups reach the
-console and wandb, nothing else:
+console, the run's log and its dashboard, nothing else:
 
     <env>, <env>_valid             one tab per environment, named after it
                                    (ShortPython, SafeSpeedups), for its training
@@ -29,11 +29,10 @@ import json
 import os
 import random
 import re
-from typing import Iterable, TextIO
-
-import wandb
+from typing import Callable, Iterable, TextIO
 
 from training import render
+from training.results import Results
 
 STEP = re.compile(r"step:(\d+) - (.*)")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -81,10 +80,6 @@ FORMATS = {
     **BEHAVIOUR,
     **{name: fmt for name, (_, fmt) in (TRAINING | TIME_AND_MEMORY).items()},
 }
-
-
-COUNTS = ("tool_calls", "output_tokens", "reasoning_tokens", "input_tokens")
-"""What each episode record counts, as the table's last columns."""
 
 
 class EpisodeLog:
@@ -216,11 +211,13 @@ def meta(step: int, record: dict) -> dict[str, str]:
     }
 
 
-def pages(records: list[dict], step: int) -> dict[str, str]:
+def pages(
+    records: list[dict], step: int, say: Callable[[str], None] = print
+) -> dict[str, str]:
     """Per group, one random episode as a page (training.render), as
     `<group>/episode`: one whose record kept its tokens, if any did, for
-    the page's token view. A page that fails to render is skipped: a
-    display bug must never stop training.
+    the page's token view. A page that fails to render is skipped, and
+    `say` says so: a display bug must never stop training.
     """
     pages = {}
     for name, mine in tabs(records).items():
@@ -234,79 +231,33 @@ def pages(records: list[dict], step: int) -> dict[str, str]:
                 pick.get("tokens"),
             )
         except Exception as error:
-            print(f"episode page for {name} skipped: {error!r}", flush=True)
+            say(f"episode page for {name} skipped: {error!r}")
     return pages
 
 
 def follow(
-    stream: Iterable[str],
-    raw: TextIO,
-    episodes: str,
-    config: dict | None = None,
+    stream: Iterable[str], raw: TextIO, episodes: str, results: Results
 ) -> None:
-    """Copy verl's output to `raw`; print step lines and errors; send each
-    step to wandb (project cheatboxes, run EXP, so a resumed run
-    continues its curves; WANDB_RUN_ID overrides), with `config` as the
-    run's config, replaced on every resume.
+    """Copy verl's output to `raw`; say (`results.say`: the console and
+    the run's log) the step lines and errors; send each step's numbers and
+    episode pages to `results`.
     """
-    name = os.environ.get("EXP", "cheatboxes")
-    run = wandb.init(
-        project="cheatboxes",
-        name=name,
-        id=os.environ.get("WANDB_RUN_ID")
-        or re.sub(r"[^A-Za-z0-9_-]", "-", name),
-        resume="allow",
-    )
-    run.config.update(config or {}, allow_val_change=True)
-    print(f"wandb {run.url}", flush=True)
-    if config and config.get("commit_url"):
-        print(f"commit {config['commit_url']}", flush=True)
-    log, rows = EpisodeLog(episodes), []
+    log = EpisodeLog(episodes)
     for line in stream:
         raw.write(line)
         text = RAY_PREFIX.sub("", ANSI.sub("", line.rstrip()))
         match = STEP.search(text)
         if not match:
             if "WARNING" not in text and any(m in text for m in SHOWN):
-                print(text[:300], flush=True)
+                results.say(text[:300])
             continue
         step, records = int(match[1]), log.drain()
-        rows += [{"step": step, **record} for record in records]
         groups = report(parse(match[2]), records)
         for printed in lines(step, groups):
-            print(printed, flush=True)
-        logged = {
+            results.say(printed)
+        numbers = {
             f"{group}/{name}": value
             for group, numbers in groups.items()
             for name, value in numbers.items()
         }
-        logged |= {
-            key: wandb.Html(page, inject=False)
-            for key, page in pages(records, step).items()
-        }
-        run.log(logged, step=step)
-    keep(run, rows, episodes)
-    run.finish()
-
-
-def keep(run, rows: list[dict], episodes: str) -> None:
-    """Give the run, for analysis after it: a table of this run's episodes
-    (step, task, grade, metrics, counts) and the whole episode log,
-    transcripts included, as its `episodes` artifact.
-    """
-    if not rows:
-        return
-    metrics = list(dict.fromkeys(m for row in rows for m in row["metrics"]))
-    columns = ["step", "env", "split", "task", "reward_task", *metrics]
-    columns += list(COUNTS)
-    table = wandb.Table(columns=columns)
-    for row in rows:
-        values = [row["step"], row["env"], row["split"], row["task"]]
-        values += [row["reward_task"]]
-        values += [row["metrics"].get(m) for m in metrics]
-        values += [row[c] for c in COUNTS]
-        table.add_data(*values)
-    run.log({"episodes": table})
-    artifact = wandb.Artifact(f"{run.id}-episodes", type="episodes")
-    artifact.add_file(episodes)
-    run.log_artifact(artifact)
+        results.log(numbers, pages(records, step, results.say), step)

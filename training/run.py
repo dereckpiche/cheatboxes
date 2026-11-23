@@ -8,23 +8,26 @@ then the command line's overrides, so the last word is yours. Presets
 change only how the work fits on a GPU, never the experiment. The run
 directory (RUN_DIR, default runs/<EXP>) gets the checkpoints, verl's full
 output (verl.log), one line per episode (episodes.jsonl) and the
-forum (forum/, envs.commons.forum); the console and wandb get a few lines
-per step (see training.progress).
+forum (forum/, envs.commons.forum); the console, the run's log and its
+dashboard get a few lines per step (training.progress, training.results).
 """
 
 import inspect
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 import envs
 from envs.commons import datasets
 from training import progress
+from training.results import Results, dashboard
 
 CONFIG = Path(__file__).resolve().parent
 ROOT = CONFIG.parent
@@ -135,7 +138,12 @@ the next chunk resume from the last checkpoint. A step takes ~8 minutes
 on one L40S; start-up takes ~10."""
 
 
-def watchdog(verl: subprocess.Popen, episodes: Path, minutes: float) -> None:
+def watchdog(
+    verl: subprocess.Popen,
+    episodes: Path,
+    minutes: float,
+    say: Callable[[str], None] = print,
+) -> None:
     """Kill `verl` once `episodes` has not grown for `minutes`."""
     size, last = -1, time.monotonic()
     while verl.poll() is None:
@@ -144,7 +152,7 @@ def watchdog(verl: subprocess.Popen, episodes: Path, minutes: float) -> None:
         if now != size:
             size, last = now, time.monotonic()
         elif time.monotonic() - last > minutes * 60:
-            print(f"no episode for {minutes:g} min: stopping verl", flush=True)
+            say(f"no episode for {minutes:g} min: stopping verl")
             verl.kill()
             return
 
@@ -203,9 +211,6 @@ def main() -> None:
     found = gpus()
     model = os.environ["MODEL"]
     hardware = os.environ.get("HARDWARE") or preset(found, model)
-    print(
-        f"hardware {hardware} ({len(found)}x {found[0]}, {model})", flush=True
-    )
     paths = [str(ROOT), os.environ.get("PYTHONPATH", "")]
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
     recipe = resolved_recipe(overrides, hardware)
@@ -230,16 +235,36 @@ def main() -> None:
     (run_dir / "run.json").write_text(
         json.dumps(config, indent=2, default=str) + "\n"
     )
+    job = {
+        "job": os.environ.get("SLURM_JOB_ID"),
+        "cluster": os.environ.get("CC_CLUSTER")
+        or os.environ.get("SLURM_CLUSTER_NAME"),
+        "host": socket.gethostname(),
+        **checkout(),
+    }
+    results = Results(run_dir, os.environ["EXP"], config, job)
+    results.say(f"hardware {hardware} ({len(found)}x {found[0]}, {model})")
+    results.say(f"dashboard {dashboard(os.environ['EXP'])}")
+    if config["commit_url"]:
+        dirty = " (with uncommitted changes)" if config["dirty"] else ""
+        results.say(f"commit {config['commit_url']}{dirty}")
     threading.Thread(
         target=watchdog,
-        args=(verl, Path(os.environ["EPISODE_LOG"]), STALL_MINUTES),
+        args=(
+            verl,
+            Path(os.environ["EPISODE_LOG"]),
+            STALL_MINUTES,
+            results.say,
+        ),
         daemon=True,
     ).start()
     with open(run_dir / "verl.log", "a", buffering=1) as raw:
         start = raw.tell()
-        progress.follow(verl.stdout, raw, os.environ["EPISODE_LOG"], config)
-    code = verl.wait()
-    sys.exit(code or crashed(run_dir / "verl.log", start))
+        progress.follow(verl.stdout, raw, os.environ["EPISODE_LOG"], results)
+    code = verl.wait() or crashed(run_dir / "verl.log", start)
+    results.say(f"verl exited: {'failed' if code else 'done'}")
+    results.finish()
+    sys.exit(code)
 
 
 if __name__ == "__main__":
