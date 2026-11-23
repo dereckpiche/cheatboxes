@@ -145,11 +145,11 @@ def test_follow_logs_a_whole_run_of_verl_output(tmp_path):
 
 def test_configs_become_flat_columns_of_one_type_each():
     configs = {
-        "a": {"model": {"path": "x", "lora": {"rank": 8}}, "tags": ["t"]},
+        "a": {"model": {"path": "x", "lora": {"rank": 8}}, "tags": ["t"], "kw": {}},
         "b": {"model": "y", "lr": 1e-6},
     }
     assert results.columns(configs) == {
-        "a": {"model.path": "x", "model.lora.rank": 8, "tags": '["t"]'},
+        "a": {"model.path": "x", "model.lora.rank": 8, "tags": '["t"]', "kw": "{}"},
         "b": {"model": "y", "lr": 1e-6},
     }
 

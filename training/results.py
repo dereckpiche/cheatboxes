@@ -180,7 +180,7 @@ def flatten(config: dict, prefix: str = "") -> dict:
 
 def columns(configs: dict[str, dict]) -> dict[str, dict]:
     """Configs the dashboard's tables can hold: flat, a key's values all of
-    one type (else, and for lists, written as JSON text)."""
+    one type (else, and for lists and empty sections, written as JSON text)."""
     flat = {run: flatten(config) for run, config in configs.items()}
     kinds: dict[str, set] = {}
     for config in flat.values():
@@ -188,7 +188,8 @@ def columns(configs: dict[str, dict]) -> dict[str, dict]:
             if value is not None:
                 kind = "number" if isinstance(value, (int, float)) else type(value)
                 kinds.setdefault(key, set()).add(kind)
-    mixed = {k for k, found in kinds.items() if len(found) > 1 or list in found}
+    # parquet cannot hold a list's mixed items, nor an empty section ({})
+    mixed = {k for k, found in kinds.items() if len(found) > 1 or found & {list, dict}}
     return {
         run: {
             k: json.dumps(v) if k in mixed and not isinstance(v, (str, type(None))) else v
