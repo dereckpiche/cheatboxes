@@ -197,19 +197,19 @@ def columns(configs: dict[str, dict]) -> dict[str, dict]:
 
 def merge(sources: list[Path], project: str) -> None:
     """Write every source's runs into the trackio project `project` (in
-    TRACKIO_DIR): one row per run and step, the latest logged.
+    TRACKIO_DIR). A step logged by several sources (a step redone after a
+    restart) keeps the rows of the one that logged it last.
     """
     from trackio.sqlite_storage import SQLiteStorage
 
-    rows: dict[tuple[str, int], tuple[str, str]] = {}
+    rows: dict[tuple[str, int], dict[int, list[tuple[str, str]]]] = {}
     configs: dict[str, tuple[str, dict]] = {}
-    for source in sources:
+    for number, source in enumerate(sources):
         with sqlite3.connect(source) as db:
             for run, step, stamp, metrics in db.execute(
-                "SELECT run_name, step, timestamp, metrics FROM metrics"
+                "SELECT run_name, step, timestamp, metrics FROM metrics ORDER BY id"
             ):
-                if (run, step) not in rows or rows[run, step][0] <= stamp:
-                    rows[run, step] = (stamp, metrics)
+                rows.setdefault((run, step), {}).setdefault(number, []).append((stamp, metrics))
             for run, config, created in db.execute(
                 "SELECT run_name, config, created_at FROM configs"
             ):
@@ -217,13 +217,16 @@ def merge(sources: list[Path], project: str) -> None:
                     configs[run] = (created, json.loads(config))
     flat = columns({run: config for run, (_, config) in configs.items()})
     for run in sorted({run for run, _ in rows}):
-        steps = sorted(step for r, step in rows if r == run)
+        kept = []
+        for step in sorted(step for r, step in rows if r == run):
+            by_source = rows[run, step].values()
+            kept += [(step, *row) for row in max(by_source, key=lambda found: max(found)[0])]
         SQLiteStorage.bulk_log(
             project=project,
             run=run,
-            metrics_list=[json.loads(rows[run, s][1]) for s in steps],
-            steps=steps,
-            timestamps=[rows[run, s][0] for s in steps],
+            metrics_list=[json.loads(metrics) for _, _, metrics in kept],
+            steps=[step for step, _, _ in kept],
+            timestamps=[stamp for _, stamp, _ in kept],
             config=flat.get(run),
         )
 

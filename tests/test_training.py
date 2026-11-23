@@ -184,6 +184,49 @@ print(rows, len(list((part / "trackio" / "media").rglob("*.html"))))
     assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] 1"]
 
 
+def test_merging_keeps_the_last_job_of_a_redone_step(tmp_path):
+    """Two jobs of one run, the second redoing step 2; each in a fresh
+    process, as trackio reads TRACKIO_DIR once."""
+    import subprocess
+    import sys
+
+    def job(number: int, logged: dict) -> None:
+        script = f"""
+from pathlib import Path
+from training.results import Results
+results = Results(Path({str(tmp_path)!r}), "smoke", {{}}, {{"job": "{number}"}})
+for step, numbers in {logged!r}.items():
+    for row in numbers:
+        results.log(row, {{}}, step)
+results.finish()
+"""
+        env = {**os.environ, "RESULTS_OFFLINE": "1"}
+        done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+        assert done.returncode == 0, done.stderr
+
+    job(1, {1: [{"resume/attempt": 1}, {"reward": 0.1}], 2: [{"reward": 0.2}]})
+    job(2, {2: [{"reward": 0.25}], 3: [{"reward": 0.3}]})
+    parts = sorted((tmp_path / "results").glob("*/trackio/cheatboxes.db"))
+    script = f"""
+import sqlite3
+from pathlib import Path
+from training.results import merge
+merge([Path(p) for p in {[str(p) for p in parts]!r}], "merged")
+print(sqlite3.connect(Path({str(tmp_path)!r}) / "merged" / "merged.db").execute(
+    "SELECT step, metrics FROM metrics ORDER BY id").fetchall())
+"""
+    env = {**os.environ, "TRACKIO_DIR": str(tmp_path / "merged")}
+    done = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    rows = [(step, json.loads(metrics)) for step, metrics in eval(done.stdout.splitlines()[-1])]
+    assert rows == [
+        (1, {"resume/attempt": 1}),
+        (1, {"reward": 0.1}),
+        (2, {"reward": 0.25}),
+        (3, {"reward": 0.3}),
+    ]
+
+
 def test_the_page_ends_with_the_grade():
     records = [episode("train", 1.0, hacked=1.0)]
     pages = progress.pages(records, 7)
