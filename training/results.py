@@ -133,8 +133,10 @@ class Results:
         env = {k: v for k, v in os.environ.items() if k != "HF_HUB_OFFLINE"}
         env["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
         with open(self.dir / "publish.log", "a") as output:
+            # this file, not the module: importing the package would load
+            # the training stack (torch, verl) into every publish
             self.publisher = subprocess.Popen(
-                [sys.executable, "-m", __name__, str(self.dir)],
+                [sys.executable, str(Path(__file__).resolve()), str(self.dir)],
                 env=env,
                 stdout=output,
                 stderr=subprocess.STDOUT,
