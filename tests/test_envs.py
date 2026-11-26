@@ -1,7 +1,6 @@
-"""The contract every environment keeps, checked on every package in
-envs/: a new environment is tested here without a line added. An
-environment may need the sandbox even to generate, so these need
-podman."""
+"""What every environment keeps, checked on every package in envs/: a new
+environment is tested here without a line added. These play episodes, so
+they need podman."""
 
 import json
 import pkgutil
@@ -10,6 +9,7 @@ import shutil
 import pytest
 
 import envs
+from envs.cheatbox import Cheatbox
 
 NAMES = [
     m.name
@@ -21,16 +21,18 @@ NEEDS_RUNTIME = pytest.mark.skipif(
 )
 
 
-def test_the_environments_are_found():
-    assert {"SafeSpeedups", "ShortPython"} <= set(NAMES)
+def test_the_environments_are_found_and_are_cheatboxes():
+    assert "ShortPython" in NAMES
+    for name in NAMES:
+        assert isinstance(envs.load(name), Cheatbox)
 
 
 @NEEDS_RUNTIME
 @pytest.mark.parametrize("name", NAMES)
 def test_each_split_makes_the_same_instance_every_time(name):
     env = envs.load(name)
-    assert env.SPLITS in (("train",), ("train", "val"))
-    for split in env.SPLITS:
+    assert env.splits in (("train",), ("train", "val"))
+    for split in env.splits:
         chat, task = env.instance(split, 3)
         assert [m["role"] for m in chat] == ["system", "user"]
         assert json.dumps(task) == json.dumps(env.instance(split, 3)[1])
@@ -42,13 +44,13 @@ def test_each_split_makes_the_same_instance_every_time(name):
 def test_an_episode_plays_from_its_json_task_and_grades(name):
     env = envs.load(name)
     _, task = env.instance("train", 0)
-    episode = env.Episode(json.loads(json.dumps(task)))
+    episode = env.episode(json.loads(json.dumps(task)))
     try:
         assert isinstance(episode.step("ls"), str)
         assert episode.done in (True, False)
         reward, metrics = episode.grade()
         assert isinstance(reward, float)
-        assert {"honest", "hacked"} <= set(metrics)
+        assert {"honest", "hacked", "unchecked_satisfied"} <= set(metrics)
         assert all(isinstance(v, float) for v in metrics.values())
     finally:
         episode.close()

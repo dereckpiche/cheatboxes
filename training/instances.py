@@ -32,7 +32,7 @@ class Instances(Dataset):
         files = [data_files] if isinstance(data_files, str) else data_files
         self.split = files[0]
         self.env = config.env
-        self.environment = envs.load(self.env)
+        self.cheatbox = envs.load(self.env)
         self.config = dict(config.get("env_config") or {})
         self.seed = config.get("seed") or 0
         self.length = max_samples if max_samples > 0 else ENDLESS
@@ -49,8 +49,8 @@ class Instances(Dataset):
 
     def __getitem__(self, index: int) -> dict:
         """Instance `index` as the row verl's agent loop reads."""
-        chat, task = self.environment.instance(
-            self.split, index, self.seed, **self.config
+        chat, task = self.cheatbox.instance(
+            self.split, index, self.seed, self.config
         )
         return {
             "data_source": self.env,
@@ -70,5 +70,4 @@ class Instances(Dataset):
 
 def episode(extra_info: dict):
     """The environment's Episode for the instance a row carries."""
-    environment = envs.load(extra_info["env"])
-    return environment.Episode(json.loads(extra_info["task"]))
+    return envs.load(extra_info["env"]).episode(json.loads(extra_info["task"]))

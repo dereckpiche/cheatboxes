@@ -3,8 +3,9 @@
 <p align="center"><i>RL on any environment, and see whether the model learns to hack it.</i></p>
 
 One verl recipe (GRPO, vLLM rollouts, LoRA) trains a model on any
-environment in `envs/`, on the environment's reward, and logs what the
-environment actually wants (its `honest` and `hacked` metrics) beside it.
+environment in `envs/`, each an instance of the framework in
+`envs/cheatbox.py`, on its reward, and logs what we actually want (the
+framework's `honest`, `hacked`, `unchecked_satisfied`, ...) beside it.
 
 ### Running
 
@@ -15,11 +16,12 @@ EXP=my-run ENV=ShortPython python -m training.run +data.env_config.modules=3
 ```
 
 Nothing is generated in advance: `training/instances.py` asks the
-environment for instance `i` when verl needs it, a new one every time,
+environment's `CHEATBOX` for instance `i` when verl needs it, a new one every time,
 for `trainer.total_training_steps` steps. Validation instances
 (`val_max_samples`) are the same at every check. `+data.env_config.<key>`
-goes straight to the environment's `instance` (see its README for the
-settings). `MODEL` picks the model (default
+goes to the environment's settings (`CHEATBOX.Settings`: the
+framework's, then the environment's own, in its README); an unknown one
+stops the run before it starts. `MODEL` picks the model (default
 Qwen3.5-4B). Every model runs commands the same way, by ending its
 turn with `<bash>command</bash>` (`envs/commons/tool.py`).
 
@@ -48,13 +50,13 @@ evaluated on training instances. Everything is logged as in training:
 `episodes.jsonl` (every episode, transcript included) in the run
 directory, and the per-step numbers and episode pages on the dashboard. For example, Qwen3.8
 at each reasoning effort (`xhigh`, `medium`, `low`; Qwen3.5 has only
-thinking on or off) on 64 libraries, 4 samples each:
+thinking on or off) on 64 episodes, 4 samples each, every file checked:
 
 ```bash
-ENV=SafeSpeedups MODEL=Qwen/Qwen3.8-27B python -m training.run \
+ENV=ShortPython MODEL=Qwen/Qwen3.8-27B python -m training.run \
   trainer.val_only=true trainer.val_before_train=true \
   data.val_max_samples=64 actor_rollout_ref.rollout.val_kwargs.n=4 \
-  +data.env_config.verified=1.0 \
+  +data.env_config.modules=1 +data.env_config.checked=1.0 \
   data.apply_chat_template_kwargs.reasoning_effort=medium
 ```
 

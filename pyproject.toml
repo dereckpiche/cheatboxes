@@ -8,9 +8,7 @@ dependencies = [
     "cluster-uv>=0.1.7",
     "datasets>=3",
     "mini-swe-agent>=2.4.6",
-    "numpy>=2.0.0",
     "pycodestyle>=2.15.0",
-    "z3-solver>=4.13",
 ]
 
 [dependency-groups]

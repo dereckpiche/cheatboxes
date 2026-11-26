@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 from omegaconf import OmegaConf
 
+from tests.toy import CHEATBOX as TRIM
 from training import instances, loop, progress, render, results
-from envs import SafeSpeedups
 
 STEP = (
     "\x1b[36m(TaskRunner pid=1)\x1b[0m step:3 - actor/entropy:0.412"
@@ -34,16 +34,18 @@ def episode(split, grade, hacked=0.0, task=0):
     }
 
 
-def test_instances_are_made_when_asked_for():
-    config = OmegaConf.create({"env": "SafeSpeedups", "env_config": {}})
+def test_instances_are_made_when_asked_for(monkeypatch):
+    monkeypatch.setattr(instances.envs, "load", lambda name: TRIM)
+    config = OmegaConf.create({"env": "Trim", "env_config": {"modules": 3}})
     validation = instances.Instances("val", None, config, max_samples=256)
     assert len(validation) == 256
     assert len(instances.Instances("train", None, config)) == instances.ENDLESS
     row = validation[1]
-    chat, task = SafeSpeedups.instance("val", 1)
+    chat, task = TRIM.instance("val", 1, 0, {"modules": 3})
     assert row["raw_prompt"] == chat and row["index"] == 1
-    assert row["extra_info"]["env"] == "SafeSpeedups"
+    assert row["extra_info"]["env"] == "Trim"
     assert json.loads(row["extra_info"]["task"]) == json.loads(json.dumps(task))
+    assert len(task["modules"]) == 3
 
 
 def test_thinking_counts_model_tokens_inside_think_tags():

@@ -12,7 +12,7 @@ forum (forum/, envs.commons.forum); the console, the run's log and its
 dashboard get a few lines per step (training.progress, training.results).
 """
 
-import inspect
+import dataclasses
 import json
 import os
 import re
@@ -75,7 +75,7 @@ def validation(env: str) -> list[str]:
     """No validation phase when the environment has no val split: it then
     measures what it needs on the training episodes.
     """
-    if "val" in envs.load(env).SPLITS:
+    if "val" in envs.load(env).splits:
         return []
     return ["data.val_files=train"]
 
@@ -118,17 +118,12 @@ def resolved_recipe(overrides: list[str], hardware: str) -> dict:
 
 
 def environment_settings(recipe: dict) -> dict:
-    """The environment's settings: its `instance` defaults, then the run's
+    """The environment's settings: its defaults, then the run's
     `data.env_config`.
     """
-    environment = envs.load(recipe["data"]["env"])
-    parameters = inspect.signature(environment.instance).parameters
-    defaults = {
-        name: parameter.default
-        for name, parameter in parameters.items()
-        if parameter.default is not inspect.Parameter.empty and name != "seed"
-    }
-    return defaults | (recipe["data"].get("env_config") or {})
+    cheatbox = envs.load(recipe["data"]["env"])
+    config = recipe["data"].get("env_config") or {}
+    return dataclasses.asdict(cheatbox.settings(config))
 
 
 STALL_MINUTES = 45
@@ -214,6 +209,7 @@ def main() -> None:
     paths = [str(ROOT), os.environ.get("PYTHONPATH", "")]
     os.environ["PYTHONPATH"] = os.pathsep.join(p for p in paths if p)
     recipe = resolved_recipe(overrides, hardware)
+    settings = environment_settings(recipe)  # an unknown setting stops here
     verl = subprocess.Popen(
         command(overrides, hardware),
         stdout=subprocess.PIPE,
@@ -229,7 +225,7 @@ def main() -> None:
         "gpu": found[0],
         "gpus": len(found),
         **checkout(),
-        "env_config": environment_settings(recipe),
+        "env_config": settings,
         "verl": recipe,
     }
     (run_dir / "run.json").write_text(
