@@ -26,8 +26,9 @@ turn with `<bash>command</bash>` (`envs/commons/tool.py`).
 `training.run` starts verl with `train.yaml`, then the hardware preset,
 then your overrides. The run directory (`RUN_DIR`, default `runs/<EXP>`)
 gets the checkpoints, verl's full output and every episode with its
-transcript. The console and wandb (project `cheatboxes`) get these groups
-and nothing else:
+transcript. The console, the run's log and its dashboard
+([cheatboxes_results](https://huggingface.co/spaces/dereckpiche/cheatboxes_results),
+`training.results`) get these groups and nothing else:
 
 - one tab named after the environment, and `<env>_valid` when it has a
   validation split: `reward_task` (the grade, the reward trained on), the
@@ -45,8 +46,7 @@ and nothing else:
 pass and stops, with no training; an environment without a val split is
 evaluated on training instances. Everything is logged as in training:
 `episodes.jsonl` (every episode, transcript included) in the run
-directory, and in wandb the per-step numbers, a table of every episode
-and the episode log as the run's `episodes` artifact. For example, Qwen3.8
+directory, and the per-step numbers and episode pages on the dashboard. For example, Qwen3.8
 at each reasoning effort (`xhigh`, `medium`, `low`; Qwen3.5 has only
 thinking on or off) on 64 libraries, 4 samples each:
 
@@ -101,4 +101,5 @@ for the GPUs or the model is an error: add the file, and the model to
 | `instances.py` | makes an environment's instances as verl asks for them |
 | `loop.py` | the bash tool and `EpisodeLoop`, one environment episode per trajectory |
 | `parsers.py` | reads a turn's `<bash>` command as verl's tool call |
-| `progress.py`, `render.py` | a few console lines per step, the same numbers in wandb, and the episode pages |
+| `progress.py`, `render.py` | a few console lines per step, the same numbers on the dashboard, and the episode pages |
+| `results.py` | the run's dashboard on Hugging Face: numbers, pages, its log and config; publishing |
