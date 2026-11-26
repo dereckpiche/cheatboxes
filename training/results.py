@@ -11,6 +11,8 @@ run, a folder per part in it, as the job writes it locally:
                                     host, and the run's whole config
     runs/<run>/<part>/log.txt       the job's log: the lines this code
                                     prints on purpose, nothing from libraries
+    runs/<run>/<part>/metrics.json  what each of its numbers means, for the
+                                    dashboard's ⓘ (training.progress)
     runs/<run>/<part>/trackio.db    the job's trackio database
     runs/<run>/<part>/pages/<step>/<name>.html
                                     the step's HTML pages (episodes)
@@ -52,6 +54,8 @@ TOKEN_FILE = Path("~/.hf_token_dereckpiche").expanduser()
 cluster's own Hugging Face login (for models) may be another account."""
 EVERY = 300
 """Seconds between publishes while the run goes."""
+PART_FILES = ("job.json", "log.txt", "metrics.json")
+"""A part's files published as they are, beside its database and pages."""
 
 
 def now() -> str:
@@ -70,7 +74,14 @@ class Results:
     written under `run_dir`/results/<part> and published in the background.
     """
 
-    def __init__(self, run_dir: Path, run: str, config: dict, job: dict):
+    def __init__(
+        self,
+        run_dir: Path,
+        run: str,
+        config: dict,
+        job: dict,
+        descriptions: dict[str, str],
+    ):
         """Open the run's part for this job.
 
         Args:
@@ -80,6 +91,8 @@ class Results:
             job: Where this job runs: job (its id, the part's name),
                 cluster, host, commit, commit_url, dirty, and command (by
                 default, this process's).
+            descriptions: What each number means, by its logged name;
+                written as the part's metrics.json.
         """
         self.part = str(job.get("job") or datetime.now().strftime("%Y%m%d-%H%M%S"))
         self.dir = Path(run_dir) / "results" / self.part
@@ -104,6 +117,10 @@ class Results:
         record = {"run": run, "part": self.part, "started": now(), "command": sys.argv}
         record |= {**job, "config": config}
         (self.dir / "job.json").write_text(json.dumps(record, default=str) + "\n")
+        metrics = json.dumps(descriptions, indent=1, ensure_ascii=False)
+        (self.dir / "metrics.json").write_text(metrics + "\n")
+        self.described = set(descriptions)
+        self.undescribed: set[str] = set()
         self.log_file = open(self.dir / "log.txt", "a", buffering=1)
         self.publisher: subprocess.Popen | None = None
         self.published = 0.0
@@ -118,7 +135,11 @@ class Results:
 
     def log(self, numbers: dict, pages: dict[str, str], step: int) -> None:
         """Log a step's numbers and HTML pages (name -> page, written to
-        pages/<step>/<name, / as _>.html), then publish if it is time."""
+        pages/<step>/<name, / as _>.html), then publish if it is time. A
+        number without a description is said once."""
+        for name in sorted(set(numbers) - self.described - self.undescribed):
+            self.undescribed.add(name)
+            self.say(f"no description for {name}")
         self.trackio.log(dict(numbers), step=step)
         for name, page in pages.items():
             path = self.dir / page_path(step, name)
@@ -260,7 +281,7 @@ def page_path(step: int, name: str) -> str:
 
 
 def publish(part: Path) -> None:
-    """Upload a part (its database, new pages, record and log) to its run's
+    """Upload a part (its database, new pages, and PART_FILES) to its run's
     folder, then rebuild the dashboard's data from every part in the bucket."""
     from huggingface_hub import HfApi
 
@@ -271,7 +292,7 @@ def publish(part: Path) -> None:
     uploaded_file = part / "uploaded.json"
     uploaded = set(json.loads(uploaded_file.read_text())) if uploaded_file.exists() else set()
     with tempfile.TemporaryDirectory() as tmp:
-        add = [(str(part / n), f"{folder}/{n}") for n in ("job.json", "log.txt") if (part / n).exists()]
+        add = [(str(part / n), f"{folder}/{n}") for n in PART_FILES if (part / n).exists()]
         database = part / "trackio" / f"{PROJECT}.db"
         if has_metrics(database):  # not before trackio's first write
             snapshot = Path(tmp) / "part.db"  # a consistent copy while trackio writes

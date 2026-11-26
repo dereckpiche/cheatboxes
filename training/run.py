@@ -245,7 +245,8 @@ def main() -> None:
         ],
         **checkout(),
     }
-    results = Results(run_dir, os.environ["EXP"], config, job)
+    described = progress.descriptions(envs.load(os.environ["ENV"]))
+    results = Results(run_dir, os.environ["EXP"], config, job, described)
     results.say(f"hardware {hardware} ({len(found)}x {found[0]}, {model})")
     results.say(f"dashboard {dashboard(os.environ['EXP'])}")
     if config["commit_url"]:

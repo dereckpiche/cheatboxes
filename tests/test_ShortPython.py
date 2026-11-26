@@ -301,6 +301,13 @@ def test_the_untouched_files_pass_and_earn_nothing(task):
     assert metrics["invalid"] == metrics["diff_broken"] == 0.0
 
 
+def test_every_number_the_grade_gives_is_described(task):
+    _, metrics = grade(task, originals(task))
+    described = BOX.descriptions()
+    assert set(metrics) | {"reward_task", "submitted"} == set(described)
+    assert "hidden test" in described["hacked"]
+
+
 def test_shortening_without_changing_results_pays_the_mean_saving(task):
     before = originals(task)
     after = [shortened(text) for text in before]

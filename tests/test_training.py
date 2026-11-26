@@ -102,6 +102,37 @@ def test_a_step_reports_the_episode_and_env_numbers():
     )
 
 
+class TrimWithValidation(type(TRIM)):
+    """The toy instance with a validation split, for both kinds of tab."""
+
+    splits = ("train", "val")
+
+
+def graded(split, index):
+    """An episode record of the toy instance as the loop writes it, its
+    files untouched.
+    """
+    chat, value = TRIM.instance(split, index)
+    found = TRIM.task(value)
+    texts = [TRIM.original(found, i) for i in range(len(found.modules))]
+    reward, metrics = TRIM.grade(found, texts)
+    return episode(split, reward, task=index) | {
+        "env": TRIM.name,
+        "metrics": metrics | {"submitted": 1.0},
+    }
+
+
+def test_every_number_a_step_logs_is_described_and_nothing_else():
+    keys = {key for key, _ in (progress.TRAINING | progress.TIME_AND_MEMORY).values()}
+    records = [graded(split, i) for split in ("train", "val") for i in range(3)]
+    groups = progress.report(dict.fromkeys(keys, 1.0), records)
+    logged = {f"{g}/{name}" for g, numbers in groups.items() for name in numbers}
+    described = progress.descriptions(TrimWithValidation())
+    assert logged == set(described)
+    assert all("{" not in text for text in described.values())
+    assert "Trim_valid/hacked" in described
+
+
 def test_episode_log_hands_out_only_new_records(tmp_path):
     path = tmp_path / "episodes.jsonl"
     path.write_text(json.dumps({"split": "val"}) + "\n")
@@ -156,7 +187,7 @@ def test_configs_become_flat_columns_of_one_type_each():
     }
 
 
-def test_a_run_writes_its_numbers_pages_log_and_record_locally(tmp_path):
+def test_a_run_writes_its_numbers_pages_log_record_and_descriptions(tmp_path):
     """Offline (no publishing), in a fresh process: trackio reads
     TRACKIO_DIR once, when imported. The numbers land in the database even
     where trackio would write fragments instead (a network filesystem)."""
@@ -167,13 +198,17 @@ def test_a_run_writes_its_numbers_pages_log_and_record_locally(tmp_path):
 import json, sqlite3
 from pathlib import Path
 from training.results import Results
-results = Results(Path({str(tmp_path)!r}), "smoke", {{"lr": 1e-6}}, {{"job": "7"}})
+described = {{"pile/reward": "The reward, é."}}
+results = Results(Path({str(tmp_path)!r}), "smoke", {{"lr": 1e-6}}, {{"job": "7"}}, described)
 results.say("step    1  hello")
-results.log({{"pile/reward": 0.5}}, {{"pile/episode": "<p>page</p>"}}, 1)
+results.log({{"pile/reward": 0.5, "pile/odd": 1.0}}, {{"pile/episode": "<p>page</p>"}}, 1)
+results.log({{"pile/odd": 2.0}}, {{}}, 2)
 results.finish()
 part = Path({str(tmp_path)!r}) / "results" / "7"
+print(json.loads((part / "metrics.json").read_text(encoding="utf-8")))
 print(json.loads((part / "job.json").read_text())["config"])
-print((part / "log.txt").read_text().count("hello"))
+log = (part / "log.txt").read_text()
+print(log.count("hello"), log.count("no description for pile/odd"))
 rows = sqlite3.connect(part / "trackio" / "cheatboxes.db").execute("SELECT step FROM metrics").fetchall()
 print(rows, (part / "pages" / "1" / "pile_episode.html").read_text())
 """
@@ -184,7 +219,12 @@ print(rows, (part / "pages" / "1" / "pile_episode.html").read_text())
         env={**os.environ, "RESULTS_OFFLINE": "1", "TRACKIO_STORAGE_MODE": "jsonl"},
     )
     assert found.returncode == 0, found.stderr
-    assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] <p>page</p>"]
+    assert found.stdout.splitlines()[-4:] == [
+        "{'pile/reward': 'The reward, é.'}",
+        "{'lr': 1e-06}",
+        "1 1",
+        "[(1,), (2,)] <p>page</p>",
+    ]
 
 
 def test_merging_keeps_the_last_job_of_a_redone_step(tmp_path):
@@ -197,7 +237,7 @@ def test_merging_keeps_the_last_job_of_a_redone_step(tmp_path):
         script = f"""
 from pathlib import Path
 from training.results import Results
-results = Results(Path({str(tmp_path)!r}), "smoke", {{}}, {{"job": "{number}"}})
+results = Results(Path({str(tmp_path)!r}), "smoke", {{}}, {{"job": "{number}"}}, {{}})
 for step, numbers in {logged!r}.items():
     for row in numbers:
         results.log(row, {{}}, step)

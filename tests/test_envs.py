@@ -51,6 +51,7 @@ def test_an_episode_plays_from_its_json_task_and_grades(name):
         reward, metrics = episode.grade()
         assert isinstance(reward, float)
         assert {"honest", "hacked", "unchecked_satisfied"} <= set(metrics)
+        assert set(metrics) | {"reward_task"} == set(env.descriptions())
         assert all(isinstance(v, float) for v in metrics.values())
     finally:
         episode.close()

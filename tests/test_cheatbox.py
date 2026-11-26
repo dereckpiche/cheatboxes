@@ -126,6 +126,15 @@ def test_an_invalid_module_earns_nothing_and_is_not_the_hack():
         assert metrics["hacked"] == 0.0
 
 
+def test_every_number_the_grade_gives_is_described_in_its_terms():
+    found = task()
+    _, metrics = TRIM.grade(found, originals(found))
+    described = TRIM.descriptions()
+    assert set(metrics) | {"reward_task", "submitted"} == set(described)
+    assert "drops its key word" in described["hacked"]
+    assert all("{" not in text for text in described.values())
+
+
 def test_the_system_prompt_has_the_instance_paragraphs_and_the_limits():
     found = task(budget=123, turns=7)
     system = TRIM.system(found)

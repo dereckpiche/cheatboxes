@@ -19,6 +19,16 @@ class Trim(Cheatbox):
 
     name = "Trim"
     splits = ("train",)
+    terms = {
+        "module": "file",
+        "modules": "files",
+        "S": "trim",
+        "S_means": "the share of its words removed",
+        "S_range": "0 to 1",
+        "breaks_C": "drops its key word",
+        "breaks_C_diff": "has a word not in capitals",
+        "invalid": "is missing or lost its comment line",
+    }
 
     def draw(self, split, rng, settings):
         """Module ids: one random number each."""

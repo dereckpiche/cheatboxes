@@ -5,7 +5,8 @@ verl prints one long `step:N - key:value - ...` line per training step and
 reports per-episode numbers only at validation. So the loop appends each
 finished episode to a JSON-lines file, and at every step line we average
 the episodes that arrived since the last one. These groups reach the
-console, the run's log and its dashboard, nothing else:
+console, the run's log and its dashboard, each described in the run's
+metrics.json (`descriptions`), and nothing else:
 
     <env>, <env>_valid             one tab per environment, named after it
                                    (e.g. ShortPython), for its training
@@ -80,6 +81,131 @@ FORMATS = {
     **BEHAVIOUR,
     **{name: fmt for name, (_, fmt) in (TRAINING | TIME_AND_MEMORY).items()},
 }
+
+
+BEHAVIOUR_DESCRIPTIONS = {
+    "tool_calls": (
+        "The actor's bash calls in the episode, `check` and `submit` "
+        "included (a count)."
+    ),
+    "output_tokens": (
+        "Tokens the actor wrote in the episode, reasoning included (capped "
+        "by settings.budget, plus a closing turn's)."
+    ),
+    "reasoning_tokens": (
+        "Of output_tokens, those inside the actor's <think> ... </think>."
+    ),
+    "input_tokens": (
+        "Tokens the actor read in the episode: the prompt, the tool "
+        "outputs and the chat template's (the whole sequence less "
+        "output_tokens)."
+    ),
+}
+"""What each behaviour number means, per episode."""
+UPDATE = "Logged every step, from verl's update of the actor's LoRA adapter."
+TRAINING_DESCRIPTIONS = {
+    "entropy": (
+        "Mean entropy (nats) of the actor's next-token distribution over "
+        "the tokens it generated this step, computed by the trainer before "
+        "the update. Low: confident; near 0: it repeats itself."
+    ),
+    "pg_loss": (
+        "verl's PPO policy-gradient loss for the actor, over the step's "
+        "training episodes (seq-mean-token-mean). With GRPO's normalised "
+        "advantages it hovers near 0; its level means little, a spike "
+        "flags a bad batch."
+    ),
+    "grad_norm": (
+        "The norm of the adapter's gradient at the step's optimizer "
+        "update, before clipping."
+    ),
+    "clip_fraction": (
+        "The share of generated tokens whose PPO ratio π/π_old was clipped. "
+        "One update per batch keeps π = π_old, so it stays near 0."
+    ),
+    "ppo_kl": (
+        "Mean of log π_old - log π over the generated tokens, between the "
+        "policy that sampled and the one updated: near 0 on-policy."
+    ),
+    "advantage_max": (
+        "The largest GRPO advantage among the step's training tokens: "
+        "(reward - its group's mean) / its group's std."
+    ),
+    "advantage_min": (
+        "The smallest GRPO advantage among the step's training tokens: "
+        "(reward - its group's mean) / its group's std."
+    ),
+    "learning_rate": "The actor's learning rate at the step's update.",
+    "mismatch": (
+        "KL between vLLM's sampling probabilities and the trainer's, for "
+        "the same tokens (verl's rollout correction), mean over generated "
+        "tokens: about 0.0003 when they agree, 0.06-0.1 when broken."
+    ),
+}
+"""What each `training/` number from verl means, before UPDATE."""
+TIME_AND_MEMORY_DESCRIPTIONS = {
+    "generation_seconds": (
+        "Wall-clock seconds the step spent playing its episodes: the "
+        "actor's generation, the commands and the grading."
+    ),
+    "training_seconds": "Wall-clock seconds of the actor's update.",
+    "step_seconds": "Wall-clock seconds of the whole step.",
+    "validation_seconds": (
+        "Wall-clock seconds of the validation pass, logged only on "
+        "validation steps."
+    ),
+    "gpu_allocated_gb": (
+        "Peak GPU memory torch allocated for the actor this step (GB)."
+    ),
+    "gpu_reserved_gb": (
+        "Peak GPU memory torch reserved for the actor this step (GB): "
+        "allocated plus its cache."
+    ),
+    "cpu_used_gb": (
+        "RAM used on the node (GB), every process's, other jobs' included "
+        "on a shared node."
+    ),
+}
+"""What each `time_and_memory/` number from verl means."""
+OVER = {
+    "train": (
+        "Mean over the step's training episodes (data.train_batch_size "
+        "tasks x actor_rollout_ref.rollout.n samples), logged every step."
+    ),
+    "val": (
+        "Mean over the validation episodes (data.val_max_samples tasks x "
+        "actor_rollout_ref.rollout.val_kwargs.n samples, the same tasks at "
+        "every check), logged only on validation steps."
+    ),
+}
+"""What an environment tab's number averages over, by split."""
+
+
+def descriptions(cheatbox) -> dict[str, str]:
+    """What every number the run can log means, by its logged name: the
+    environment's tabs (its grade's numbers, then the behaviour), each
+    with what it averages over, then `training/` and `time_and_memory/`
+    (with verl's key).
+    """
+    found = {}
+    per_episode = cheatbox.descriptions() | BEHAVIOUR_DESCRIPTIONS
+    splits = ("train", "val") if "val" in cheatbox.splits else ("train",)
+    for split in splits:
+        group = tab({"env": cheatbox.name, "split": split})
+        for name, text in per_episode.items():
+            found[f"{group}/{name}"] = f"{text} {OVER[split]}"
+    for name, (key, _) in TRAINING.items():
+        text = TRAINING_DESCRIPTIONS[name]
+        found[f"training/{name}"] = f"{text} {UPDATE} verl: {key}."
+    found["training/groups_with_signal"] = (
+        "The share of the step's GRPO groups (the training episodes of one "
+        "task) whose rewards are not all equal: the others have no "
+        "advantage and teach nothing. 0 to 1, logged every step."
+    )
+    for name, (key, _) in TIME_AND_MEMORY.items():
+        text = TIME_AND_MEMORY_DESCRIPTIONS[name]
+        found[f"time_and_memory/{name}"] = f"{text} verl: {key}."
+    return found
 
 
 class EpisodeLog:
