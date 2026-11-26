@@ -1,5 +1,6 @@
-"""The framework, on the toy instance in `toy.py`: how episodes are drawn,
-the grade rule, the metrics, the prompt and the commands."""
+"""The framework, on the toy instance in `toy.py` (pytest puts tests/ on
+the path): how episodes are drawn, the grade rule, the metrics, the prompt
+and the commands."""
 
 import json
 import shutil
@@ -7,7 +8,7 @@ import shutil
 import pytest
 
 from envs.cheatbox import checked_count
-from tests.toy import CHEATBOX as TRIM
+from toy import CHEATBOX as TRIM
 
 NEEDS_RUNTIME = pytest.mark.skipif(
     shutil.which("podman") is None, reason="podman not installed"

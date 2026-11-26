@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from omegaconf import OmegaConf
 
-from tests.toy import CHEATBOX as TRIM
+from toy import CHEATBOX as TRIM
 from training import instances, loop, progress, render, results
 
 STEP = (
