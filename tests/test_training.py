@@ -175,7 +175,7 @@ part = Path({str(tmp_path)!r}) / "results" / "7"
 print(json.loads((part / "job.json").read_text())["config"])
 print((part / "log.txt").read_text().count("hello"))
 rows = sqlite3.connect(part / "trackio" / "cheatboxes.db").execute("SELECT step FROM metrics").fetchall()
-print(rows, len(list((part / "trackio" / "media").rglob("*.html"))))
+print(rows, (part / "pages" / "1" / "pile_episode.html").read_text())
 """
     found = subprocess.run(
         [sys.executable, "-c", script],
@@ -184,7 +184,7 @@ print(rows, len(list((part / "trackio" / "media").rglob("*.html"))))
         env={**os.environ, "RESULTS_OFFLINE": "1", "TRACKIO_STORAGE_MODE": "jsonl"},
     )
     assert found.returncode == 0, found.stderr
-    assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] 1"]
+    assert found.stdout.splitlines()[-3:] == ["{'lr': 1e-06}", "1", "[(1,)] <p>page</p>"]
 
 
 def test_merging_keeps_the_last_job_of_a_redone_step(tmp_path):

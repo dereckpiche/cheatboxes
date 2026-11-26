@@ -4,17 +4,21 @@ dashboard's Run info page.
 
     https://huggingface.co/spaces/dereckpiche/cheatboxes_results
 
-The dashboard is a static Space. Its bucket (same id) holds
+The dashboard is a static Space. Its bucket (same id) holds one folder per
+run, a folder per part in it, as the job writes it locally:
 
-    sources/<run>/<part>.db         one job's trackio database for the run
-    media/<run>/<step>/<id>.html    the run's episode pages
-    runs/<run>/<part>.json          the job: commit, command, cluster, host,
-                                    and the run's whole config
-    runs/<run>/<part>.log           the job's log: the lines this code
+    runs/<run>/<part>/job.json      the job: commit, command, cluster,
+                                    host, and the run's whole config
+    runs/<run>/<part>/log.txt       the job's log: the lines this code
                                     prints on purpose, nothing from libraries
-    metrics.parquet, runs.json, aux/configs.parquet
-                                    the dashboard's data, rebuilt from every
-                                    source on each publish
+    runs/<run>/<part>/trackio.db    the job's trackio database
+    runs/<run>/<part>/pages/<step>/<name>.html
+                                    the step's HTML pages (episodes)
+
+and, at its top, trackio's dashboard data, a cache rebuilt from every
+part's database on each publish, where trackio's page reads it:
+
+    metrics.parquet, runs.json, aux/
 
 A part is one job of the run, so jobs on several clusters, and a run resumed
 elsewhere, never overwrite each other; where parts log the same step, the
@@ -25,8 +29,8 @@ RESULTS_OFFLINE=1; publish its runs from the login node instead:
 
     python -m training.results <run_dir>/results/<part>
 
-The dashboard's own pages (Run info, HTML renders) are deployed separately,
-with the dashboard code on Mila (~/results-dashboard).
+The dashboard's own pages (left bar, HTML renders, Run info) are deployed
+separately, with the dashboard code on Mila (~/results-dashboard).
 """
 
 import json
@@ -113,12 +117,13 @@ class Results:
         self.log_file.write(f"{stamp}  {line}\n")
 
     def log(self, numbers: dict, pages: dict[str, str], step: int) -> None:
-        """Log a step's numbers and HTML pages (name -> page), then publish
-        if it is time."""
-        logged = dict(numbers)
+        """Log a step's numbers and HTML pages (name -> page, written to
+        pages/<step>/<name, / as _>.html), then publish if it is time."""
+        self.trackio.log(dict(numbers), step=step)
         for name, page in pages.items():
-            logged[name] = self.trackio.Html(page, inject=False)
-        self.trackio.log(logged, step=step)
+            path = self.dir / page_path(step, name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(page)
         if time.monotonic() - self.published > EVERY:
             self.publish()
 
@@ -249,49 +254,54 @@ def merge(sources: list[Path], project: str) -> None:
         )
 
 
+def page_path(step: int, name: str) -> str:
+    """Where a step's page goes in its part: pages/<step>/<name, / as _>.html."""
+    return f"pages/{step}/{name.replace('/', '_')}.html"
+
+
 def publish(part: Path) -> None:
-    """Upload a part (its database, new pages, record and log), then rebuild
-    the dashboard's data from every part in the bucket."""
+    """Upload a part (its database, new pages, record and log) to its run's
+    folder, then rebuild the dashboard's data from every part in the bucket."""
     from huggingface_hub import HfApi
 
     token = os.environ.get("HF_TOKEN") or TOKEN_FILE.read_text().strip()
     api = HfApi(token=token)
     record = json.loads((part / "job.json").read_text())
-    run, name = record["run"], record["part"]
-    trackio_dir = part / "trackio"
+    folder = f"runs/{record['run']}/{record['part']}"
     uploaded_file = part / "uploaded.json"
     uploaded = set(json.loads(uploaded_file.read_text())) if uploaded_file.exists() else set()
     with tempfile.TemporaryDirectory() as tmp:
-        add = [(str(part / "job.json"), f"runs/{run}/{name}.json")]
-        database = trackio_dir / f"{PROJECT}.db"
+        add = [(str(part / n), f"{folder}/{n}") for n in ("job.json", "log.txt") if (part / n).exists()]
+        database = part / "trackio" / f"{PROJECT}.db"
         if has_metrics(database):  # not before trackio's first write
             snapshot = Path(tmp) / "part.db"  # a consistent copy while trackio writes
             with sqlite3.connect(database) as db:
                 with sqlite3.connect(snapshot) as copy:
                     db.backup(copy)
-            add.append((str(snapshot), f"sources/{run}/{name}.db"))
-        if (part / "log.txt").exists():
-            add.append((str(part / "log.txt"), f"runs/{run}/{name}.log"))
-        media = trackio_dir / "media" / PROJECT
-        new = sorted(
-            str(f.relative_to(media))
-            for f in media.rglob("*")
-            if f.is_file() and str(f.relative_to(media)) not in uploaded
-        ) if media.exists() else []
-        add += [(str(media / f), f"media/{f}") for f in new]
+            add.append((str(snapshot), f"{folder}/trackio.db"))
+        pages = {str(f.relative_to(part)): f for f in part.glob("pages/*/*")}
+        new = sorted(set(pages) - uploaded)
+        add += [(str(pages[n]), f"{folder}/{n}") for n in new]
+        # Parts of jobs that started before the pages left trackio hold them
+        # in its media, <run>/<step>/<file>: until those runs end.
+        media = part / "trackio" / "media" / PROJECT
+        legacy = {str(f.relative_to(media)): f for f in media.glob("*/*/*.html")} if media.exists() else {}
+        old = sorted(set(legacy) - uploaded)
+        add += [(str(legacy[n]), f"{folder}/pages/{legacy[n].parent.name}/{legacy[n].name}") for n in old]
+        new += old
         api.batch_bucket_files(SPACE, add=add)
         uploaded_file.write_text(json.dumps(sorted(uploaded | set(new))))
         rebuild(api, Path(tmp))
-    print(f"{now()}  published {run} part {name}: {len(new)} new pages", flush=True)
+    print(f"{now()}  published {folder}: {len(new)} new pages", flush=True)
 
 
 def rebuild(api, tmp: Path) -> None:
     """Rebuild the dashboard's data (metrics.parquet, runs.json, aux/) from
-    every source database in the bucket."""
+    every part's database in the bucket."""
     found = [
         f.path
-        for f in api.list_bucket_tree(SPACE, prefix="sources/", recursive=True)
-        if f.path.startswith("sources/") and f.path.endswith(".db")
+        for f in api.list_bucket_tree(SPACE, prefix="runs/", recursive=True)
+        if f.path.startswith("runs/") and f.path.endswith("/trackio.db")
     ]
     sources = [tmp / "sources" / str(i) / "part.db" for i in range(len(found))]
     for path in sources:
